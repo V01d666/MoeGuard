@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "role_id": "lumen",
+  "display_name": "Lumen",
+  "tier": "official-9",
+  "fps": 6,
+  "canvas": [
+    512,
+    512
+  ],
+  "distribution_ready": true,
+  "interaction": {
+    "edge_reveal_fraction": 0.45,
+    "peek_action_semantics": "viewer_direction"
+  },
+  "dialogue": {
+    "click_lines": [
+      "嗯？我在听。",
+      "别急，慢慢说。",
+      "刚才那页看到哪了？",
+      "是在叫我吗？",
+      "今天也辛苦了。"
+    ]
+  },
+  "provenance": {
+    "status": "release-approved",
+    "license": "Apache-2.0",
+    "ai_assisted": true,
+    "source": "Original MoeGuard role selected and edited by the project author."
+  },
+  "review": {
+    "directional_actions": {
+      "peek_left": {
+        "status": "accepted"
+      },
+      "peek_right": {
+        "status": "accepted"
+      }
+    }
+  },
+  "actions": {
+    "idle": {
+      "expected_frames": 12
+    },
+    "notice": {
+      "expected_frames": 8
+    },
+    "click_reaction": {
+      "expected_frames": 8
+    },
+    "dragging": {
+      "expected_frames": 18
+    },
+    "patrol": {
+      "expected_frames": 12
+    },
+    "welcome": {
+      "expected_frames": 8
+    },
+    "peek_left": {
+      "expected_frames": 8
+    },
+    "peek_right": {
+      "expected_frames": 8
+    },
+    "sit_down": {
+      "expected_frames": 8
+    }
+  }
+}

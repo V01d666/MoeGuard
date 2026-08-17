@@ -1,0 +1,20 @@
+MoeGuard (萌卫)
+Copyright 2026 MoeGuard Contributors
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+Bundled third-party model files:
+
+- YuNet face-detection model — MIT; bundled license text:
+  resources/models/YuNet-LICENSE.txt
+  https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet
+- SFace face-recognition model — Apache-2.0
+  https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface
+
+The bundled Lumen, Poppy, and Rook role assets are original MoeGuard project
+assets created with generative tools and author selection/editing. They are
+distributed with this project under Apache-2.0.
+
+Python dependencies are installed separately from their original packages.
+A future binary distribution must carry the notices and license texts required
+by the exact components bundled in that binary.

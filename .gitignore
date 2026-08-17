@@ -1,0 +1,73 @@
+# T1 实验产物：帧序列不入仓库（保留 mp4 + 少量样张即可）
+docs/research/*-assets/frames_*/frame_0*.png
+
+# === 敏感资产准入规范（D26/E6）===
+# 真人影像 / 生物特征 / 摄像头帧 = 默认不入库
+# 调研报告只保留统计结论(txt/json)与打码样张
+**/owner_*.jpg
+**/owner_*.npy
+**/register_source_*.jpg
+**/*_face_*.jpg
+**/identify_*.jpg
+**/detection_*.jpg
+**/frame_2*.jpg
+**/test_frame_*.jpg
+**/*-results/*.jpg
+**/*-results/*.npy
+
+# Python
+__pycache__/
+*.pyc
+.pytest-tmp/
+.ruff_cache/
+# 本机验证、构建与私有生成产物统一留在仓库根目录，不进入 Git
+/artifacts/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# 虚拟环境（D32: 已迁移到 .venv/，旧 moeguard/ 下的 venv 残留由下两行覆盖）
+venv/
+.venv/
+moeguard/bin/
+moeguard/lib/
+moeguard/lib64
+moeguard/Scripts/
+moeguard/pyvenv.cfg
+moeguard/share/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# 运行时数据与根目录敏感配置（`~` 在 gitignore 中不会展开为用户主目录）
+/.moeguard/
+/.env
+/.env.*
+/config*.toml
+*.enc
+*.key
+*.pem
+*.p12
+*.pfx
+/evidence/
+**/evidence/*.jpg
+**/evidence/*.png
+**/evidence/*.avi
+**/evidence/*.mp4
+
+# T1.5 实验产物：中间帧序列不入仓库（保留 mp4 + 少量样张）
+docs/research/*-assets/t15-output/*/
+# 注意：transparent-frames/ 不被排除（M0-1 spike 需要）
+
+# === v2 美术素材清理规则 ===
+# 视频文件不应入仓库（体积大，可重新生成）
+resources/v2_test_output/*/raw_video.mp4
+# T2I 测试产物（可重新生成，不入仓库）
+resources/t2i_test/
+.DS_Store
+.claude/settings.json
+.claude/settings.local.json

@@ -1,0 +1,35 @@
+# 统一换行符为 LF，避免 Windows/macOS 切换开发时的 CRLF/LF 冲突
+* text=auto eol=lf
+
+# 文本类型显式指定
+*.py   text eol=lf
+*.md   text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.txt  text eol=lf
+*.sh   text eol=lf
+*.gitignore text eol=lf
+*.gitattributes text eol=lf
+
+# Windows 专用脚本保留 CRLF
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# 二进制不处理换行
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.icns binary
+*.mp4  binary
+*.mp3  binary
+*.wav  binary
+*.onnx binary
+*.db   binary
+*.model3.json text eol=lf
+*.physics3.json text eol=lf
+*.moc3 binary

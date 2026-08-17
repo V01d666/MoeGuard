@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moeguard"
+version = "0.1.0"
+description = "萌卫 MoeGuard — 二次元虚拟桌宠 × 智能安防"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "MoeGuard Contributors" }]
+keywords = ["desktop-pet", "security", "anime", "face-recognition", "guard"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Security",
+    "Operating System :: Microsoft :: Windows",
+]
+dependencies = [
+    "PySide6>=6.6",
+    "opencv-python>=4.8",
+    "numpy>=1.24,<2.3",
+    "cryptography>=42",
+    "pillow>=10",
+    "tomli_w>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pyinstaller>=6",
+    "ruff>=0.4",
+]
+[project.scripts]
+moeguard = "moeguard.main:main"
+
+[tool.setuptools.packages.find]
+include = ["moeguard*", "resources"]
+
+[tool.setuptools.package-data]
+resources = ["**/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["docs/research"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"
