@@ -14,11 +14,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 
 <p align="center">
-  <img src="resources/roles/lumen/idle/0001.png" alt="Lumen" width="180">
-  <img src="resources/roles/poppy/idle/0001.png" alt="Poppy" width="180">
-  <img src="resources/roles/rook/idle/0001.png" alt="Rook" width="180">
-  <br>
-  <sub>Lumen · Poppy · Rook</sub>
+  <img src=".github/assets/cover.png" alt="萌卫 MoeGuard 封面" width="100%">
 </p>
 
 萌卫的想法很简单：让桌面上住着一位小小的搭档。
@@ -26,6 +22,12 @@
 你忙碌时，它安静地待在一旁；你戳戳它、拎起它，或者把它推到屏幕边缘，它也会有自己的反应。等你锁屏离开，它还能在你明确同意后打开摄像头，替你留意一会儿周围的动静。回来时，摄像头会关闭，桌宠会恢复陪伴，再告诉你刚才有没有发生什么。
 
 所以它并不是披着桌宠外衣的监控软件——更像一位偶尔认真过头的小搭档：平时负责陪你，必要时顺手看家。
+
+<p align="center">
+  <img src=".github/assets/baseCharas.png" alt="初始三角色：Lumen、Poppy、Rook" width="100%">
+  <br>
+  <sub>初始三角色：Lumen、Poppy、Rook</sub>
+</p>
 
 ## 现在的萌卫
 
