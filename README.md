@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://ifdian.net/a/moeguard">
+    <img src="https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-%E6%94%AF%E6%8C%81%E8%90%8C%E5%8D%AB-946CE6?style=for-the-badge" alt="爱发电 · 支持萌卫">
+  </a>
+</p>
+
 # 萌卫 MoeGuard
 
 > 一只恰好会看家的二次元桌宠。
@@ -35,7 +41,7 @@
 
 希望将来的萌卫不只是“从几只桌宠里选一只”，而是能让你用文字或一张图片做出喜欢的角色，再为它慢慢添上性格、陪伴对话、养成和更多互动。<sup>*</sup>
 
-<sub>* 这些是爱发电共创支持版的规划方向，尚未上线或出售，不是当前 GitHub 基础版已经交付的功能。只有真正做成、测试过并能下载的内容，才会成为支持版权益。</sub>
+<sub>* 这些是[爱发电共创支持版](https://ifdian.net/a/moeguard)的规划方向，尚未上线或出售，不是当前 GitHub 基础版已经交付的功能。只有真正做成、测试过并能下载的内容，才会成为支持版权益。</sub>
 
 ## 在 Windows 上运行
 
