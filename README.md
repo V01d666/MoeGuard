@@ -1,3 +1,7 @@
+<p align="right">
+  <strong>简体中文</strong> · <a href="README.en.md">English</a>
+</p>
+
 <p align="center">
   <a href="https://ifdian.net/a/moeguard">
     <img src="https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-%E6%94%AF%E6%8C%81%E8%90%8C%E5%8D%AB-946CE6?style=for-the-badge" alt="爱发电 · 支持萌卫">
@@ -39,15 +43,20 @@
 
 项目目前仍是 **experimental pre-alpha**。它可以认真帮忙，但不是专业安防设备，也不能替代系统锁屏或监控产品。
 
+## 项目时间线
+
+- [2026/08/23] 🎬 自定义角色功能的实机 Demo 已完成：可以通过文字或图片生成身份候选和 MoeGuard 所需的九个动作，单独重做不满意的动作，再保存角色包或直接安装。功能仍在开发中；你可以先观看[文字生成桌宠](.github/assets/text2pet-demo.mp4)与[图片生成桌宠](.github/assets/image2pet-demo.mp4)的完整流程。
+- [2026/08/18] 🚀 [MoeGuard v0.1.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.1.0) 正式发布，带来三位初始角色、完整桌面互动、手动值守和经单独授权的 Windows 锁屏值守。
+
 ## 以后呢？
 
-希望将来的萌卫不只是“从几只桌宠里选一只”，而是能让你用文字或一张图片做出喜欢的角色，再为它慢慢添上性格、陪伴对话、养成和更多互动。<sup>*</sup>
-
-<sub>* 这些是[爱发电共创支持版](https://ifdian.net/a/moeguard)的规划方向，尚未上线或出售，不是当前 GitHub 基础版已经交付的功能。只有真正做成、测试过并能下载的内容，才会成为支持版权益。</sub>
+希望将来的萌卫不只是“从几只桌宠里选一只”，而是能让你做出喜欢的角色，再为它慢慢添上性格、陪伴对话、养成和更多互动。开发计划会在 GitHub 和[爱发电](https://ifdian.net/a/moeguard)同步说明；只有真正做成、测试过并能下载或体验的内容，才会被写成已经交付的功能。
 
 ## 在 Windows 上运行
 
-当前 GitHub 基础版提供免费源码，适合自行运行和审查本地安防逻辑；需要 **64 位 Windows 10/11 与 Python 3.12**。只想养桌宠不需要摄像头，启用值守时才会用到。
+普通用户可以从 [GitHub Releases](https://github.com/V01d666/MoeGuard/releases) 下载 Windows x64 ZIP，完整解压后双击 `MoeGuard.exe`，不需要安装 Python。只想养桌宠不需要摄像头，启用值守时才会用到。
+
+如果希望从源码运行或审查本地安防逻辑，需要 **64 位 Windows 10/11 与 Python 3.12**：
 
 ```powershell
 git clone https://github.com/V01d666/MoeGuard.git
@@ -58,8 +67,6 @@ py -3.12 -m venv .venv
 ```
 
 首次启动会先说明值守风险。你可以只使用桌宠，也可以稍后再从设置中注册主人、授权锁屏值守。
-
-未来若上架爱发电共创支持版，会提供普通用户可直接双击的 `MoeGuard.exe`，不要求安装 Python、输入命令或配置开发环境；在做到这一点之前，不会拿源码压缩包冒充成品。
 
 ## 关于摄像头和你的数据
 

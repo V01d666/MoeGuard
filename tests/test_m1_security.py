@@ -2,11 +2,10 @@
 """M1 安防感知模块测试脚本。
 
 验证 FaceRecognizer + OwnerProfile 的基本功能。
-不依赖 PySide6，可在 VPS 上运行。
+不依赖 PySide6，可在无 GUI 环境运行。
 不产生真人影像（使用合成图像）。
 
-运行方式:
-    cd /root/projects/MoeGuard
+运行方式（仓库根目录）:
     python3 tests/test_m1_security.py
 """
 
