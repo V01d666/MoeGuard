@@ -12,21 +12,25 @@ AI 对话与形象生成代码保留在 v2 实验层，但没有 MVP UI、凭据
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QKeySequence
+from PySide6.QtGui import QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QKeySequenceEdit,
     QLabel,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -35,6 +39,7 @@ from PySide6.QtWidgets import (
 
 from moeguard.config import AppConfig
 from moeguard.pet.role_assets import discover_bundled_roles
+from moeguard.roles import PackageKey, RoleContractError, RoleLibrary
 from moeguard.ui import theme
 
 logger = logging.getLogger(__name__)
@@ -83,8 +88,18 @@ class SettingsDialog(QDialog):
 
     withdraw_patrol_consent_requested = Signal()
     manage_evidence_requested = Signal()
+    custom_role_workbench_requested = Signal()
+    role_credit_dialog_requested = Signal()
 
-    def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        parent: QWidget | None = None,
+        *,
+        role_library: RoleLibrary | None = None,
+        custom_role_workbench_available: bool = False,
+        role_credit_dialog_available: bool = False,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("settingsDialog")
         self.setWindowTitle("萌卫设置")
@@ -92,6 +107,9 @@ class SettingsDialog(QDialog):
         self.setStyleSheet(theme.dialog_qss("settingsDialog"))
 
         self._config = config
+        self._role_library = role_library or RoleLibrary()
+        self._custom_role_workbench_available = custom_role_workbench_available
+        self._role_credit_dialog_available = role_credit_dialog_available
         self._patrol_consent_withdrawn = False
 
         layout = QVBoxLayout(self)
@@ -213,17 +231,39 @@ class SettingsDialog(QDialog):
         page.setContentsMargins(12, 12, 12, 12)
         page.setSpacing(10)
 
-        # 分区 1：内置桌宠角色。角色包由清单自动发现，新增正式角色无需再改 UI。
+        # 分区 1：内置角色与已校验的受管自定义角色版本。
         role_frame, role_form = _make_section(
             "桌宠外观",
-            "切换已经随萌卫安装的完整角色；自定义角色导入将在后续版本开放。",
+            "切换内置角色或本机角色库中已通过校验的自定义版本。",
         )
         self.role_selector = QComboBox()
         bundled_roles = discover_bundled_roles()
         available_ids = {role.role_id for role in bundled_roles}
         for role in bundled_roles:
             self.role_selector.addItem(role.display_name, role.role_id)
-        if pet.assets_dir:
+        try:
+            installed_roles = self._role_library.list()
+        except OSError as exc:
+            logger.warning("读取本地角色库失败: %s", exc)
+            installed_roles = ()
+        for installed in installed_roles:
+            self.role_selector.addItem(
+                f"{installed.package.display_name}（自定义 v{installed.key.package_version}）",
+                installed.key,
+            )
+
+        managed_key = None
+        if pet.role_package_version > 0:
+            try:
+                managed_key = PackageKey(pet.role_id, pet.role_package_version)
+            except RoleContractError as exc:
+                logger.warning("忽略损坏的角色包配置: %s", exc)
+        if managed_key is not None:
+            selected_role = self.role_selector.findData(managed_key)
+            if selected_role < 0:
+                logger.warning("当前受管角色不可用，设置页回退到 Lumen: %s", managed_key)
+                selected_role = self.role_selector.findData("lumen")
+        elif pet.assets_dir:
             self.role_selector.addItem("自定义角色包（当前）", "__custom__")
             selected_role = self.role_selector.findData("__custom__")
         elif pet.role_id not in available_ids:
@@ -233,6 +273,62 @@ class SettingsDialog(QDialog):
             selected_role = self.role_selector.findData(pet.role_id)
         self.role_selector.setCurrentIndex(max(0, selected_role))
         role_form.addRow("当前角色", self.role_selector)
+
+        self.role_preview = QLabel("选择角色后显示待机预览")
+        self.role_preview.setAlignment(Qt.AlignCenter)
+        self.role_preview.setMinimumHeight(150)
+        role_form.addRow("预览", self.role_preview)
+
+        role_actions = QWidget()
+        role_actions_layout = QGridLayout(role_actions)
+        role_actions_layout.setContentsMargins(0, 0, 0, 0)
+        role_actions_layout.setSpacing(8)
+        role_action_buttons: list[QPushButton] = []
+        self.import_role_button = QPushButton("导入角色包…")
+        self.import_role_button.setStyleSheet(theme.button_qss("normal"))
+        self.import_role_button.clicked.connect(self._import_role_package)
+        role_action_buttons.append(self.import_role_button)
+        if self._custom_role_workbench_available:
+            self.custom_role_button = QPushButton("桌宠工坊…")
+            self.custom_role_button.setStyleSheet(theme.button_qss("accent"))
+            self.custom_role_button.setToolTip(
+                "打开桌宠工坊；当前设置中尚未保存的修改会被取消。"
+            )
+            self.custom_role_button.clicked.connect(self._open_custom_role_workbench)
+            self.role_pilot_notice_button = QPushButton("内测数据说明…")
+            self.role_pilot_notice_button.setToolTip(
+                "查看桌宠工坊内测期间的数据暂存范围和期限"
+            )
+            self.role_pilot_notice_button.clicked.connect(
+                self._show_role_pilot_notice
+            )
+            self.role_pilot_notice_button.setStyleSheet(theme.button_qss("normal"))
+            role_action_buttons.extend(
+                (self.custom_role_button, self.role_pilot_notice_button)
+            )
+        self.remove_role_button = QPushButton("删除所选版本")
+        self.remove_role_button.setStyleSheet(theme.button_qss("normal"))
+        self.remove_role_button.clicked.connect(self._remove_selected_role)
+        role_action_buttons.append(self.remove_role_button)
+        for column, button in enumerate(role_action_buttons):
+            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            role_actions_layout.addWidget(button, 0, column)
+            role_actions_layout.setColumnStretch(column, 1)
+        role_form.addRow("角色管理", role_actions)
+        if self._role_credit_dialog_available:
+            self.role_credit_button = QPushButton("查看次数 / 兑换码…")
+            self.role_credit_button.setStyleSheet(theme.button_qss("normal"))
+            self.role_credit_button.setToolTip(
+                "查看桌宠工坊的立绘和动作生成次数，或兑换一次性兑换码。"
+            )
+            self.role_credit_button.clicked.connect(self._open_role_credit_dialog)
+            role_form.addRow("生成服务", self.role_credit_button)
+        self.role_selector.currentIndexChanged.connect(
+            self._update_role_management_state
+        )
+        self.role_selector.currentIndexChanged.connect(self._update_role_preview)
+        self._update_role_management_state()
+        self._update_role_preview()
         page.addWidget(role_frame)
 
         # 分区 2：值守触发
@@ -287,6 +383,149 @@ class SettingsDialog(QDialog):
 
         self._tabs.addTab(tab, "通用")
 
+    def _open_custom_role_workbench(self) -> None:
+        """Close the stale settings snapshot before opening the role editor."""
+        self.reject()
+        self.custom_role_workbench_requested.emit()
+
+    def _show_role_pilot_notice(self) -> None:
+        from moeguard.role_pilot import PILOT_NOTICE_TEXT
+
+        QMessageBox.information(
+            self,
+            "桌宠工坊内测数据说明",
+            PILOT_NOTICE_TEXT,
+        )
+
+    def _open_role_credit_dialog(self) -> None:
+        """Close the stale settings snapshot before managing online credits."""
+        self.reject()
+        self.role_credit_dialog_requested.emit()
+
+    def _update_role_management_state(self) -> None:
+        self.remove_role_button.setEnabled(
+            isinstance(self.role_selector.currentData(), PackageKey)
+        )
+
+    def _update_role_preview(self) -> None:
+        selected = self.role_selector.currentData()
+        root = None
+        if isinstance(selected, PackageKey):
+            try:
+                root = self._role_library.get(selected).root
+            except (AttributeError, OSError, RoleContractError):
+                root = None
+        elif selected == "__custom__" and self._config.pet.assets_dir:
+            root = Path(self._config.pet.assets_dir)
+        elif isinstance(selected, str):
+            role = next(
+                (
+                    candidate
+                    for candidate in discover_bundled_roles()
+                    if candidate.role_id == selected
+                ),
+                None,
+            )
+            root = role.root if role is not None else None
+
+        frame = None
+        if root is not None:
+            native_idle = root / "actions" / "idle"
+            idle_root = native_idle if native_idle.is_dir() else root / "idle"
+            frame = next(iter(sorted(idle_root.glob("*.png"))), None)
+        if frame is None:
+            self.role_preview.setPixmap(QPixmap())
+            self.role_preview.setText("这个角色版本当前无法预览")
+            return
+
+        pixmap = QPixmap(str(frame))
+        if pixmap.isNull():
+            self.role_preview.setPixmap(QPixmap())
+            self.role_preview.setText("待机预览读取失败")
+            return
+        self.role_preview.setText("")
+        self.role_preview.setPixmap(
+            pixmap.scaled(
+                140,
+                140,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+        )
+
+    def _import_role_package(self) -> None:
+        archive_name, _ = QFileDialog.getOpenFileName(
+            self,
+            "导入 MoeGuard 角色包",
+            "",
+            "MoeGuard 角色包 (*.moeguard-role)",
+        )
+        if not archive_name:
+            return
+        try:
+            installed = self._role_library.install(Path(archive_name))
+        except (OSError, RoleContractError) as exc:
+            logger.warning("角色包导入失败: %s", exc)
+            QMessageBox.critical(
+                self,
+                "角色包导入失败",
+                "文件未通过安全或完整性校验，没有写入本地角色库。",
+            )
+            return
+
+        index = self.role_selector.findData(installed.key)
+        if index < 0:
+            self.role_selector.addItem(
+                f"{installed.package.display_name}"
+                f"（自定义 v{installed.key.package_version}）",
+                installed.key,
+            )
+            index = self.role_selector.findData(installed.key)
+        self.role_selector.setCurrentIndex(index)
+        QMessageBox.information(
+            self,
+            "角色包已导入",
+            "角色包已安全保存到本地角色库；保存设置后将切换到该版本。",
+        )
+
+    def _remove_selected_role(self) -> None:
+        selected = self.role_selector.currentData()
+        if not isinstance(selected, PackageKey):
+            return
+        if QMessageBox.warning(
+            self,
+            "删除这个角色版本？",
+            f"将从本机删除 {selected}。其它历史版本不会受影响。",
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        ) != QMessageBox.Yes:
+            return
+
+        active_key = None
+        if self._config.pet.role_package_version > 0:
+            try:
+                active_key = PackageKey(
+                    self._config.pet.role_id,
+                    self._config.pet.role_package_version,
+                )
+            except RoleContractError:
+                active_key = None
+        try:
+            self._role_library.remove(selected, active_key=active_key)
+        except (OSError, RoleContractError) as exc:
+            logger.warning("角色版本删除失败: %s", exc)
+            QMessageBox.critical(
+                self,
+                "无法删除角色版本",
+                "当前正在使用的版本须先切换并保存；其它错误请检查本地目录权限。",
+            )
+            return
+
+        index = self.role_selector.currentIndex()
+        self.role_selector.removeItem(index)
+        bundled_default = self.role_selector.findData("lumen")
+        self.role_selector.setCurrentIndex(max(0, bundled_default))
+
     # ------------------------------------------------------------------ #
     # 破坏性操作
     # ------------------------------------------------------------------ #
@@ -334,8 +573,20 @@ class SettingsDialog(QDialog):
 
         返回扁平字典，key 对应各子配置 dataclass 字段名。
         """
-        selected_role = str(self.role_selector.currentData())
-        keep_custom = selected_role == "__custom__"
+        selected_data = self.role_selector.currentData()
+        keep_legacy_custom = selected_data == "__custom__"
+        if isinstance(selected_data, PackageKey):
+            role_id = selected_data.role_id
+            role_package_version = selected_data.package_version
+            assets_dir = ""
+        elif keep_legacy_custom:
+            role_id = self._config.pet.role_id
+            role_package_version = 0
+            assets_dir = self._config.pet.assets_dir
+        else:
+            role_id = str(selected_data)
+            role_package_version = 0
+            assets_dir = ""
         return {
             # 安防
             "face_match_threshold": round(self.face_threshold.value(), 3),
@@ -349,8 +600,9 @@ class SettingsDialog(QDialog):
             "auto_patrol_enabled": self.auto_patrol_enabled.isChecked(),
             "patrol_interval_sec": round(self.patrol_interval.value(), 1),
             "device_index": int(self.camera_index.currentData()),
-            "role_id": self._config.pet.role_id if keep_custom else selected_role,
-            "assets_dir": self._config.pet.assets_dir if keep_custom else "",
+            "role_id": role_id,
+            "role_package_version": role_package_version,
+            "assets_dir": assets_dir,
             # 老板键
             "stealth_hotkey": self.stealth_hotkey_edit.keySequence().toString(),
         }

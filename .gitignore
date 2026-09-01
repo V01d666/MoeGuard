@@ -20,6 +20,12 @@ __pycache__/
 *.pyc
 .pytest-tmp/
 .ruff_cache/
+/.tmp/
+# 作者本地 UI 批注截图，不进入候选源码或发行物
+/幻灯片1.PNG
+/幻灯片2.PNG
+/幻灯片3.PNG
+/幻灯片4.PNG
 # 本机验证、构建与私有生成产物统一留在仓库根目录，不进入 Git
 /artifacts/
 *.egg-info/

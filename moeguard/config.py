@@ -125,10 +125,10 @@ class PetConfig:
     渲染时 scaled 到默认 200x300，用户可拖角缩放并持久化。
     """
 
-    # D38: 9 个动作帧组目录名
-    # idle / notice / click_reaction / dragging /
-    # peek_left / peek_right / sit_down / patrol / welcome
+    # 内置角色使用 package_version=0；受管自定义角色使用正整数版本。
+    # assets_dir 仅保留旧 demo/开发兼容，不作为正式用户选择入口。
     role_id: str = "lumen"  # 当前内置角色；由 resources/roles 下的清单解析
+    role_package_version: int = 0
     assets_dir: str = ""  # 自定义/实验角色包路径；非空时优先于内置角色
     fps: int = 6  # T1.6 定稿 25帧@6fps
     default_width: int = 200  # 默认显示宽度
@@ -268,12 +268,21 @@ class AppConfig:
 
         pet_data = data.get("pet", {})
         if pet_data:
+            pet_values = {
+                k: v for k, v in pet_data.items()
+                if k in PetConfig.__dataclass_fields__
+            }
+            package_version = pet_values.get("role_package_version", 0)
+            if (
+                isinstance(package_version, bool)
+                or not isinstance(package_version, int)
+                or package_version < 0
+            ):
+                logger.warning("忽略无效的角色包版本配置: %r", package_version)
+                pet_values["role_package_version"] = 0
             config = replace(
                 config,
-                pet=PetConfig(**{
-                    k: v for k, v in pet_data.items()
-                    if k in PetConfig.__dataclass_fields__
-                }),
+                pet=PetConfig(**pet_values),
             )
 
         img_data = data.get("image_gen", {})

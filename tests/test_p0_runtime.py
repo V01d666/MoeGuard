@@ -453,15 +453,168 @@ def test_mvp_settings_hide_cloud_and_never_probe_camera(monkeypatch) -> None:
     assert qt_app is not None
 
 
+def test_settings_replaces_a_missing_managed_role_with_lumen() -> None:
+    from dataclasses import replace
+
+    from moeguard.config import AppConfig
+    from moeguard.ui.settings_dialog import SettingsDialog
+
+    class EmptyLibrary:
+        @staticmethod
+        def list():
+            return ()
+
+    config = AppConfig()
+    config = replace(
+        config,
+        pet=replace(
+            config.pet,
+            role_id="pet-aebbf3072f104527",
+            role_package_version=2,
+        ),
+    )
+    _qt_app = QApplication.instance() or QApplication([])
+    dialog = SettingsDialog(
+        config,
+        role_library=EmptyLibrary(),
+        custom_role_workbench_available=True,
+        role_credit_dialog_available=True,
+    )
+    dialog.show()
+    _qt_app.processEvents()
+
+    assert dialog.role_selector.currentData() == "lumen"
+    assert "当前不可用" not in " ".join(
+        dialog.role_selector.itemText(index)
+        for index in range(dialog.role_selector.count())
+    )
+    row = (
+        dialog.import_role_button,
+        dialog.custom_role_button,
+        dialog.role_pilot_notice_button,
+        dialog.remove_role_button,
+    )
+    assert len({button.height() for button in row}) == 1
+    assert max(button.width() for button in row) - min(
+        button.width() for button in row
+    ) <= 1
+    assert dialog.role_credit_button.height() == row[0].height()
+    dialog.close()
+
+
+def test_screen_edge_uses_fixed_bbox_pixels_and_physical_display(monkeypatch) -> None:
+    from PySide6.QtCore import QRect
+
+    from moeguard.ui.pet_window import PetWindow, edge_snap_position
+
+    _qt_app = QApplication.instance() or QApplication([])
+    surface = QRect(0, 0, 1920, 1080)
+    content = QRect(30, 88, 140, 159)
+    point = edge_snap_position(
+        surface,
+        QRect(500, 700, 200, 300),
+        content,
+        "bottom",
+        0.75,
+        reveal_pixels=64,
+    )
+    assert surface.bottom() + 1 - (point.y() + content.y()) == 64
+
+    window = PetWindow()
+    captured: list[tuple[QRect, str]] = []
+
+    class ScreenStub:
+        @staticmethod
+        def geometry():
+            return QRect(surface)
+
+        @staticmethod
+        def availableGeometry():
+            return QRect(0, 0, 1920, 1040)
+
+    monkeypatch.setattr(PetWindow, "screen", lambda _self: ScreenStub())
+    monkeypatch.setattr(
+        window,
+        "snap_to_surface",
+        lambda target, direction: captured.append((QRect(target), direction)),
+    )
+    window.move(500, surface.bottom() - window.height() + 10)
+    window._check_edge_snap()
+    assert captured == [(surface, "bottom")]
+    window.close()
+
+
 def test_tray_has_no_paid_auto_patrol_dead_entry() -> None:
     """免费锁屏自动值守只在设置中配置，托盘不保留误导性的付费死入口。"""
     from PySide6.QtGui import QIcon
 
     from moeguard.ui.tray import TrayIcon
 
+    _qt_app = QApplication.instance() or QApplication([])
     tray = TrayIcon(QIcon())
     labels = [action.text() for action in tray._tray.contextMenu().actions()]
     assert all("付费" not in label and "离座检测" not in label for label in labels)
+    tray.shutdown()
+
+
+def test_tray_switches_between_companion_and_patrol_icons() -> None:
+    from PySide6.QtGui import QColor, QIcon, QPixmap
+
+    from moeguard.ui.tray import TrayIcon
+
+    _qt_app = QApplication.instance() or QApplication([])
+    companion_pixmap = QPixmap(8, 8)
+    companion_pixmap.fill(QColor("#2384d6"))
+    patrol_pixmap = QPixmap(8, 8)
+    patrol_pixmap.fill(QColor("#f0a070"))
+    companion = QIcon(companion_pixmap)
+    patrol = QIcon(patrol_pixmap)
+    tray = TrayIcon(companion, patrol_icon=patrol)
+
+    tray.set_state(False)
+    assert tray._tray.icon().cacheKey() == companion.cacheKey()
+    tray.set_state(True)
+    assert tray._tray.icon().cacheKey() == patrol.cacheKey()
+    tray.shutdown()
+
+
+def test_tray_only_shows_direct_role_entry_when_workbench_is_available() -> None:
+    from PySide6.QtGui import QIcon
+
+    from moeguard.ui.tray import TrayIcon
+
+    qt_app = QApplication.instance() or QApplication([])
+    tray = TrayIcon(QIcon())
+    opened: list[bool] = []
+    tray.open_custom_role_workbench.connect(lambda: opened.append(True))
+
+    assert not tray._act_custom_role.isVisible()
+    tray.set_custom_role_workbench_available(True)
+    assert tray._act_custom_role.isVisible()
+    tray._act_custom_role.trigger()
+    assert opened == [True]
+
+    tray.set_custom_role_workbench_available(False)
+    assert not tray._act_custom_role.isVisible()
+    assert qt_app is not None
+    tray.shutdown()
+
+
+def test_tray_shutdown_is_idempotent_and_detaches_native_menu() -> None:
+    from PySide6.QtGui import QIcon
+
+    from moeguard.ui.tray import TrayIcon
+
+    qt_app = QApplication.instance() or QApplication([])
+    tray = TrayIcon(QIcon())
+    assert tray._tray.contextMenu() is tray._menu
+
+    tray.shutdown()
+    assert tray._tray.contextMenu() is None
+    tray.shutdown()
+    qt_app.processEvents()
+
+    assert tray._shutdown_started is True
 
 
 def test_evidence_store_can_delete_one_or_all_events(tmp_path: Path) -> None:

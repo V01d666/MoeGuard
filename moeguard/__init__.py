@@ -4,6 +4,6 @@
 核心闭环：陪伴模式 ⇄ 值守模式，桌宠通过人脸识别区分主人与陌生人。
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0-preview"
 __license__ = "Apache-2.0"
 __all__ = ["__version__", "__license__"]

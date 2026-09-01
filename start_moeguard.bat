@@ -30,7 +30,7 @@ echo ========================================
 echo   MoeGuard
 echo ========================================
 echo.
-python -m moeguard.main
+python -m moeguard.role_main
 
 :end
 pause

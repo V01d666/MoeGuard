@@ -34,13 +34,23 @@ class TrayIcon(QObject):
     toggle_patrol = Signal(bool)  # True=进入手动值守, False=回到陪伴
     toggle_disturb_free = Signal(bool)  # 完全免打扰开关（隐藏桌宠）
     open_settings = Signal()
+    open_custom_role_workbench = Signal()
     open_security_setup = Signal()
     open_evidence = Signal()
     quit_requested = Signal()
     tray_activated = Signal(int)  # QSystemTrayIcon.ActivationReason
 
-    def __init__(self, icon: QIcon, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        icon: QIcon,
+        parent: QWidget | None = None,
+        *,
+        patrol_icon: QIcon | None = None,
+    ) -> None:
         super().__init__(parent)
+        self._shutdown_started = False
+        self._companion_icon = icon
+        self._patrol_icon = patrol_icon or icon
         self._tray = QSystemTrayIcon(icon, parent)
         self._tray.setToolTip("萌卫 MoeGuard")
 
@@ -48,6 +58,7 @@ class TrayIcon(QObject):
         self._tray.activated.connect(self._on_activated)
 
         menu = QMenu(parent)
+        self._menu = menu
 
         self._act_patrol = QAction("进入值守", menu)
         self._act_companion = QAction("回到陪伴", menu)
@@ -56,6 +67,8 @@ class TrayIcon(QObject):
         self._act_disturb_free.setCheckable(True)
 
         self._act_settings = QAction("设置…", menu)
+        self._act_custom_role = QAction("桌宠工坊…", menu)
+        self._act_custom_role.setVisible(False)
         self._act_security_setup = QAction("值守设置（风险告知与主人注册）…", menu)
         self._act_evidence = QAction("查看本地证据…", menu)
         self._act_quit = QAction("退出萌卫", menu)
@@ -66,6 +79,7 @@ class TrayIcon(QObject):
         self._act_patrol.setIcon(style.standardIcon(sp.SP_MediaPlay))
         self._act_companion.setIcon(style.standardIcon(sp.SP_MediaPause))
         self._act_settings.setIcon(style.standardIcon(sp.SP_FileDialogDetailedView))
+        self._act_custom_role.setIcon(style.standardIcon(sp.SP_FileDialogNewFolder))
         self._act_evidence.setIcon(style.standardIcon(sp.SP_DirOpenIcon))
         self._act_quit.setIcon(style.standardIcon(sp.SP_DialogCloseButton))
 
@@ -73,6 +87,7 @@ class TrayIcon(QObject):
         self._act_companion.triggered.connect(lambda: self.toggle_patrol.emit(False))
         self._act_disturb_free.toggled.connect(self.toggle_disturb_free.emit)
         self._act_settings.triggered.connect(self.open_settings)
+        self._act_custom_role.triggered.connect(self.open_custom_role_workbench)
         self._act_security_setup.triggered.connect(self.open_security_setup)
         self._act_evidence.triggered.connect(self.open_evidence)
         self._act_quit.triggered.connect(self.quit_requested)
@@ -82,6 +97,7 @@ class TrayIcon(QObject):
         menu.addSeparator()
         menu.addAction(self._act_disturb_free)
         menu.addSeparator()
+        menu.addAction(self._act_custom_role)
         menu.addAction(self._act_settings)
         menu.addAction(self._act_security_setup)
         menu.addAction(self._act_evidence)
@@ -110,10 +126,28 @@ class TrayIcon(QObject):
     def show(self) -> None:
         self._tray.show()
 
+    def shutdown(self) -> None:
+        """Detach native Windows tray resources before QApplication teardown."""
+        if self._shutdown_started:
+            return
+        self._shutdown_started = True
+        self._tray.hide()
+        self._tray.setContextMenu(None)
+        self._menu.hide()
+        self._menu.deleteLater()
+        self._tray.deleteLater()
+
     def set_state(self, on_patrol: bool) -> None:
         """根据当前是否值守，启用/禁用对应菜单项。"""
+        self._tray.setIcon(
+            self._patrol_icon if on_patrol else self._companion_icon
+        )
         self._act_patrol.setEnabled(not on_patrol)
         self._act_companion.setEnabled(on_patrol)
+
+    def set_custom_role_workbench_available(self, available: bool) -> None:
+        """仅在 v0.2 客户端注入工作台后显示直达入口。"""
+        self._act_custom_role.setVisible(bool(available))
 
     def show_message(
         self, title: str, message: str, msecs: int = 3000

@@ -6,7 +6,7 @@ MVP 阶段为「动画 + 文字气泡」；语音 TTS 为付费增强，后续�
 设计要点：告警即情绪价值--「主人回来时口头汇报可疑情况」让安防告警
 本身成为桌宠的「邀功」，而非冷冰冰的通知。
 
-D38 动作分类（9 个帧组）：
+D38 兼容动作分类（旧 9 个帧组）：
   idle / notice / click_reaction / dragging /
   peek_left / peek_right / sit_down / patrol / welcome
 
@@ -207,8 +207,8 @@ class FeedbackController(QObject):
         """贴边后切换到对应的半免打扰动作。
 
         ``peek_left/right`` 按用户看到的探头方向命名，因此左边缘消费
-        ``peek_right``、右边缘消费 ``peek_left``。底边使用坐下；顶部使用
-        坐下动作的上下镜像派生态，避免只露出悬空动画的下半身。
+        ``peek_right``、右边缘消费 ``peek_left``。上下边缘共用同一份纵向
+        探头源：下边缘正常播放，上边缘上下镜像。当前源由 ``idle`` fallback。
         """
         if direction not in {"left", "right", "top", "bottom"}:
             logger.warning("未知边缘吸附方向: %s", direction)
@@ -253,7 +253,7 @@ class FeedbackController(QObject):
             "left": "peek_right",
             "right": "peek_left",
             "top": "peek_top",
-            "bottom": "sit_down",
+            "bottom": "peek_bottom",
         }[direction]
         if direction in {"left", "right"}:
             # 左右探头先在藏身位停留 1 秒，完整探出后再停留约 1.3 秒。

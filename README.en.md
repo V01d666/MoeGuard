@@ -30,12 +30,16 @@ It is not surveillance software wearing a cute skin. Think of it as an occasiona
 <p align="center">
   <img src=".github/assets/baseCharas.png" alt="The three starter characters: Lumen, Poppy, and Rook" width="100%">
   <br>
-  <sub>The three starter characters: Lumen · Poppy · Rook</sub>
+  <sub>The three starter characters: <a href="resources/roles/lumen/idle/0001.png">Lumen</a> · <a href="resources/roles/poppy/idle/0001.png">Poppy</a> · <a href="resources/roles/rook/idle/0001.png">Rook</a></sub>
 </p>
 
 ## MoeGuard today
 
 - Includes Lumen, Poppy, and Rook, each with its own animations and click dialogue.
+- v0.2.0 Preview adds **Pet Workshop**: create a character from text or a reference image, choose a portrait, and generate only the desktop-pet actions you want.
+- `idle` is the sole required action. Missing optional interactions safely fall back to idle.
+- Installed characters can receive new or replacement actions, or a redesigned appearance, while older package versions remain available.
+- Remote Preview tasks use separate portrait-generation and action-generation allowances. The first round uses only a small set of free redemption codes; no paid product is enabled.
 - Supports idle, click, pickup, dragging, welcome, guarding, edge docking, and peek animations.
 - Guarding can be started manually or, with separate permission, when Windows is locked.
 - Unknown-person or motion events can create local screenshots and short clips that you can review and delete in the evidence manager.
@@ -45,12 +49,13 @@ The project is still an **experimental pre-alpha**. It may help keep an eye on t
 
 ## Release
 
-- [2026/08/23] 🎬 Working custom-character demos are ready. Text or image input can generate identity candidates and all nine MoeGuard animations; users can retry only unsatisfactory animations, then save or install the finished character package. The feature remains in development; watch the complete [text-to-pet](.github/assets/text2pet-demo.mp4) and [image-to-pet](.github/assets/image2pet-demo.mp4) workflows.
+- [2026/09/01] 🧪 [v0.2.0 Preview](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0-preview) has completed its first hands-on validation of Pet Workshop, remote generation allowances, task recovery, and post-install editing. A small free redemption-code trial is being prepared.
+- [2026/08/23] 🎬 The first working Pet Workshop demos were completed. Watch the full [text-to-pet](.github/assets/text2pet-demo.mp4) and [image-to-pet](.github/assets/image2pet-demo.mp4) workflows.
 - [2026/08/18] 🚀 [MoeGuard v0.1.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.1.0) is out with three starter characters, complete desktop interactions, manual guarding, and separately authorized Windows lock-screen guarding.
 
 ## What comes next?
 
-The long-term goal is not merely to choose from a small preset cast. We want you to create a character you like, then gradually add personality, conversations, progression, and richer interactions. Plans will be shared on both GitHub and [Afdian](https://ifdian.net/a/moeguard). A feature will only be described as delivered after it has been built, tested, and made available to download or use.
+Pet Workshop is only the first step toward making each character feel alive. Future work may add editable personality profiles, character-specific lines, conversations, progression, and richer interactions. Plans will be shared on both GitHub and [Afdian](https://ifdian.net/a/moeguard). A feature will only be described as delivered after it has been built, tested, and made available to download or use.
 
 ## Run on Windows
 
@@ -68,10 +73,12 @@ py -3.12 -m venv .venv
 
 The first launch explains the risks of guard mode. You can use MoeGuard only as a desktop pet, or register yourself as the owner and authorize lock-screen guarding later in Settings.
 
-## Camera and local data
+## Camera, cloud generation, and your data
 
 - Opening Settings, switching characters, or changing ordinary options does not probe or open the camera. MoeGuard attempts to open it only during owner registration or when guard mode starts.
 - The camera is used continuously only while guarding. Frames, face features, and evidence remain on your computer; the base application has no cloud face recognition.
+- Text, reference images, and task assets are sent to the MoeGuard generation service only when you explicitly create a portrait or action in Pet Workshop. Guard frames, owner features, and local evidence never enter this workflow.
+- During Preview, related requests, prompts, reference images, and generated results may be retained for up to 30 days to diagnose generation quality, connectivity, and task recovery. The client shows a short notice before first use.
 - Owner features are stored under `%USERPROFILE%\.moeguard\owner\`, and evidence under `%USERPROFILE%\.moeguard\evidence\`. Events are retained for seven days by default.
 - Revoking guard consent in Settings stops capture and deletes owner features, evidence, and related records. If a file is locked or permissions prevent deletion, MoeGuard reports that cleanup is incomplete and preserves a retry path. To remove everything manually, exit MoeGuard and delete `%USERPROFILE%\.moeguard\`.
 - The optional “blur unknown faces” setting blurs detected faces. If no valid face region is found, MoeGuard falls back to a low-resolution full-frame image; if the detector is unavailable, that raw frame is not saved. This still cannot eliminate every missed detection.
@@ -81,7 +88,7 @@ Open source lets you inspect when the camera starts, where data is written, how 
 
 ## Feedback and development
 
-Issues and ideas are welcome through GitHub Issues. Before sharing logs, remove usernames, local paths, photos, videos, owner features, and API keys. **Do not upload the entire `.moeguard`, `evidence`, or `owner` directory.**
+Issues and ideas are welcome through [GitHub Issues](https://github.com/V01d666/MoeGuard/issues). Before sharing logs, remove usernames, local paths, photos, videos, owner features, and API keys. **Do not upload the entire `.moeguard`, `evidence`, or `owner` directory.**
 
 This is a hobby project developed outside regular working hours. It does not promise enterprise response times, every platform, or a fixed release schedule. To contribute, run:
 

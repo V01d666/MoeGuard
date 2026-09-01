@@ -26,6 +26,8 @@ CRYPTO_KEY_PATH = OWNER_DIR / ".crypto_key"
 
 EVIDENCE_DIR = _BASE_DIR / "evidence"    # 用户可见路径（D20）
 MODELS_DIR = _BASE_DIR / "models"        # ONNX 模型缓存
+ROLES_DIR = _BASE_DIR / "roles"          # 受管自定义角色库
+ROLE_WORKBENCH_DIR = _BASE_DIR / "role-workbench"  # 可恢复形象档案与草稿
 
 # 随包模型的 SHA-256。内部 RC 与源码运行均通过同一份资源校验，防止
 # 损坏或被替换的模型在无感知情况下参与人脸判定。
@@ -41,7 +43,15 @@ _BUNDLED_MODEL_HASHES: dict[str, str] = {
 
 def ensure_dirs() -> None:
     """创建所有需要的目录（幂等）。"""
-    for d in (_BASE_DIR, OWNER_DIR, EVIDENCE_DIR, MODELS_DIR, LOG_DIR):
+    for d in (
+        _BASE_DIR,
+        OWNER_DIR,
+        EVIDENCE_DIR,
+        MODELS_DIR,
+        LOG_DIR,
+        ROLES_DIR,
+        ROLE_WORKBENCH_DIR,
+    ):
         d.mkdir(parents=True, exist_ok=True)
 
 

@@ -7,28 +7,28 @@
 - 作用域全部通过 objectName（如 ``#onboardingBubble``）或对象自身的 stylesheet
   完成，避免通用 QLabel/QPushButton 规则误伤桌宠透明窗口与 QMessageBox 等系统控件。
 
-调色方向：温暖、轻盈、干净 —— 暖白背景、深灰文字、低饱和蓝绿主色、
-明确但不刺眼的安全红；圆角 6-10px（气泡可稍大），用边框与背景分层而不用阴影。
+调色方向：清爽、轻盈、可信 —— 蓝白背景、深蓝灰文字、明快但不刺眼的
+守护蓝主色、明确的安全红；圆角 6-10px（气泡可稍大），用边框与背景分层。
 """
 
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
-# 颜色（暖白 / 低饱和蓝绿 / 安全红）
+# 颜色（蓝白 / 守护蓝 / 安全红）
 # ---------------------------------------------------------------------------
 
-WINDOW_BG = "#FAF8F4"           # 暖白窗口背景
+WINDOW_BG = "#F5F9FF"           # 淡蓝白窗口背景
 PANEL_BG = "#FFFFFF"            # 卡片 / 输入面板背景
-SECTION_BG = "#F2F0EA"          # 柔和浅色分区背景
-BORDER = "#E3DFD6"              # 常规边框
-BORDER_STRONG = "#D5CFC3"       # 略深边框（悬停 / 分隔）
+SECTION_BG = "#EAF3FF"          # 浅蓝分区背景
+BORDER = "#D9E7F7"              # 常规边框
+BORDER_STRONG = "#B9D2EE"       # 略深边框（悬停 / 分隔）
 
-TEXT_PRIMARY = "#3A3A3A"        # 深灰主文字
-TEXT_SECONDARY = "#7A766D"      # 次级说明文字
+TEXT_PRIMARY = "#19324D"        # 深蓝灰主文字
+TEXT_SECONDARY = "#607890"      # 次级说明文字
 
-ACCENT = "#3E8E84"              # 低饱和蓝绿主色（普通强调按钮）
-ACCENT_HOVER = "#35796F"
-ACCENT_PRESSED = "#2D6A61"
+ACCENT = "#2F7DD1"              # 萌卫守护蓝（普通强调按钮）
+ACCENT_HOVER = "#246CBD"
+ACCENT_PRESSED = "#1D5BA2"
 
 DANGER = "#C04545"              # 危险操作（撤回同意 / 删除证据）
 DANGER_HOVER = "#A93C3C"
@@ -38,11 +38,11 @@ PATROL_BANNER_BG = "#9B1C1C"    # 值守提示：高对比安全红（摄像头�
 PATROL_BANNER_TEXT = "#FFFFFF"
 
 BUBBLE_BG_RGBA = (255, 255, 255, 245)
-BUBBLE_BORDER_RGBA = (213, 207, 195, 160)
+BUBBLE_BORDER_RGBA = (185, 210, 238, 170)
 BUBBLE_BG = f"rgba{BUBBLE_BG_RGBA}"        # 气泡背景（引导 / 消息共用）
 BUBBLE_BORDER = f"rgba{BUBBLE_BORDER_RGBA}"    # 气泡边框
-PREVIEW_PLACEHOLDER_BG = "#2E2C29"            # 摄像头预览占位（暖深灰）
-PREVIEW_PLACEHOLDER_TEXT = "#9C978E"
+PREVIEW_PLACEHOLDER_BG = "#17324D"            # 摄像头预览占位（深蓝灰）
+PREVIEW_PLACEHOLDER_TEXT = "#AFC8E2"
 
 # ---------------------------------------------------------------------------
 # 尺寸（圆角 / 间距，单位 px）

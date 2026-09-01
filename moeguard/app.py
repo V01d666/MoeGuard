@@ -20,13 +20,16 @@ MoeGuardApp 负责把桌宠形象、安防核心、状态机、UI 等子系统�
 
 from __future__ import annotations
 
+import json
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import replace as dc_replace
 from datetime import datetime
+from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QThread, QTimer, Signal
+from PySide6.QtWidgets import QApplication, QDialog, QLabel
 
 from moeguard.config import (
     PATROL_CONSENT_VERSION,
@@ -42,7 +45,9 @@ from moeguard.pet.role_assets import (
     RoleInteractionProfile,
     load_runtime_role_actions,
     resolve_role_root,
+    validate_runtime_role_root,
 )
+from moeguard.roles import PackageKey, RoleContractError, RoleLibrary
 from moeguard.security.camera import CameraCapture
 from moeguard.security.evidence import EvidenceRecorder, EvidenceResult
 from moeguard.security.face import FaceRecognizer
@@ -52,6 +57,7 @@ from moeguard.storage.db import Database
 from moeguard.storage.evidence_store import EvidenceStore
 from moeguard.storage.owner_profile import OwnerProfileStore
 from moeguard.ui import theme
+from moeguard.ui.app_icons import application_icons
 from moeguard.ui.evidence_dialog import EvidenceDialog
 from moeguard.ui.onboarding import OnboardingBubble
 from moeguard.ui.pet_window import PetWindow
@@ -193,6 +199,13 @@ class MoeGuardApp(QObject):
         self._pending_interruption_notice: str | None = None
         self._evidence_maintenance_timer: QTimer | None = None
         self._pending_maintenance_notice: str | None = None
+        self._pending_role_notice: str | None = None
+        self._custom_role_workbench_factory: Callable[[], QDialog] | None = None
+        self._role_credit_dialog_factory: Callable[[], QDialog] | None = None
+        self._settings_dialog: SettingsDialog | None = None
+        self._custom_role_workbench_dialog: QDialog | None = None
+        self._role_credit_dialog: QDialog | None = None
+        self._shutdown_started = False
 
     # ------------------------------------------------------------------ #
     # 属性
@@ -214,6 +227,24 @@ class MoeGuardApp(QObject):
         """桌宠窗口。"""
         assert self._pet_window is not None
         return self._pet_window
+
+    def set_custom_role_workbench_factory(
+        self,
+        factory: Callable[[], QDialog] | None,
+    ) -> None:
+        """Inject the v0.2 workbench without coupling the base app to cloud code."""
+        self._custom_role_workbench_factory = factory
+        if self._tray is not None:
+            self._tray.set_custom_role_workbench_available(factory is not None)
+        if self._pet_window is not None:
+            self._pet_window.set_custom_role_workbench_available(factory is not None)
+
+    def set_role_credit_dialog_factory(
+        self,
+        factory: Callable[[], QDialog] | None,
+    ) -> None:
+        """Inject support-edition generation balance and redemption UI."""
+        self._role_credit_dialog_factory = factory
 
     def _persist_config(self, reason: str, *, notify: bool = True) -> bool:
         """原子保存配置，并在运行时失败时给出可见反馈。"""
@@ -284,11 +315,34 @@ class MoeGuardApp(QObject):
 
         # 11. 帧动画控制器 + 桌宠窗口
         self._frame_controller = FrameAnimationController()
-        role_profile = self._load_pet_frames(self._config.pet)
+        try:
+            role_profile = self._load_pet_frames(self._config.pet)
+        except RuntimeError as exc:
+            failed_source = (
+                f"{self._config.pet.role_id}@{self._config.pet.role_package_version}"
+            )
+            logger.error("当前角色加载失败，回退 Lumen: %s", exc)
+            self._config = dc_replace(
+                self._config,
+                pet=dc_replace(
+                    self._config.pet,
+                    role_id="lumen",
+                    role_package_version=0,
+                    assets_dir="",
+                ),
+            )
+            role_profile = self._load_pet_frames(self._config.pet)
+            self._pending_role_notice = (
+                f"角色 {failed_source} 已损坏或缺失，萌卫已安全回退到 Lumen。"
+            )
+            self._persist_config("损坏角色自动回退", notify=False)
         self._pet_window = PetWindow(
             self._frame_controller,
             fps=self._config.pet.fps,
             edge_reveal_fraction=role_profile.edge_reveal_fraction,
+        )
+        self._pet_window.set_custom_role_workbench_available(
+            self._custom_role_workbench_factory is not None
         )
 
         # 恢复缩放尺寸
@@ -307,20 +361,13 @@ class MoeGuardApp(QObject):
             click_lines=role_profile.click_lines,
         )
 
-        # 13. 系统托盘（生成简约图标：蓝盾徽记）
-        from PySide6.QtCore import Qt
-        from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
-
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(QColor(0, 0, 0, 0))
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setBrush(QColor("#3399dd"))
-        painter.setPen(Qt.NoPen)
-        painter.drawEllipse(2, 2, 28, 28)
-        painter.end()
-        self._tray = TrayIcon(QIcon(pixmap))
+        # 13. 系统托盘：陪伴与值守状态使用作者定稿的双状态图标。
+        companion_icon, patrol_icon = application_icons()
+        self._tray = TrayIcon(companion_icon, patrol_icon=patrol_icon)
         self._tray.set_state(False)  # 初始：陪伴模式，"进入值守"可选，"回到陪伴"灰色
+        self._tray.set_custom_role_workbench_available(
+            self._custom_role_workbench_factory is not None
+        )
 
         # 14. 锁屏监听
         self._lock_monitor = LockScreenMonitor()
@@ -366,6 +413,13 @@ class MoeGuardApp(QObject):
                 8000,
             )
             self._pending_maintenance_notice = None
+        if self._pending_role_notice is not None:
+            self._tray.show_message(
+                "自定义角色无法加载",
+                self._pending_role_notice,
+                8000,
+            )
+            self._pending_role_notice = None
 
         # 注册老板键
         self._pet_window.register_stealth_hotkey(
@@ -415,18 +469,139 @@ class MoeGuardApp(QObject):
         assert self._frame_controller is not None
         fc = self._frame_controller
 
-        assets_root = resolve_role_root(pet_config.role_id, pet_config.assets_dir)
+        assets_root = resolve_role_root(
+            pet_config.role_id,
+            pet_config.assets_dir,
+            package_version=pet_config.role_package_version,
+        )
         if assets_root is None:
-            logger.warning(
-                "桌宠角色不可用: role_id=%s assets_dir=%s",
-                pet_config.role_id,
-                pet_config.assets_dir,
+            raise RuntimeError(
+                f"桌宠角色不可用: role_id={pet_config.role_id} "
+                f"package_version={pet_config.role_package_version} "
+                f"assets_dir={pet_config.assets_dir}"
             )
-            return RoleInteractionProfile()
 
         logger.info("加载桌宠角色 %s: %s", pet_config.role_id, assets_root)
-        fc.clear_actions()
-        return load_runtime_role_actions(fc, assets_root, fps=pet_config.fps)
+        candidate = FrameAnimationController()
+        profile = load_runtime_role_actions(candidate, assets_root, fps=pet_config.fps)
+        if not candidate.has_action("idle"):
+            raise RuntimeError(f"角色 idle 帧无法加载: {assets_root}")
+        fc.replace_actions_from(candidate)
+        return profile
+
+    def activate_preview_role(self, package_root: str | Path) -> tuple[bool, str]:
+        """Atomically switch the running pet to a validated internal demo package.
+
+        The public base edition exposes no UI for this method.  It exists so an
+        internal, separately packaged workbench can exercise the production pet
+        window without importing ``moeguard.cloud`` into public runtime modules.
+        """
+        assert self._config is not None
+        assert self._pet_window is not None
+        assert self._feedback is not None
+
+        root = Path(package_root).resolve()
+        if not validate_runtime_role_root(root):
+            return False, "角色包缺少必需的 idle 动作帧"
+        try:
+            manifest = json.loads((root / "role.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return False, f"无法读取角色包清单：{exc}"
+        role_id = manifest.get("role_id")
+        if not isinstance(role_id, str) or not role_id.strip():
+            return False, "角色包清单缺少有效 role_id"
+
+        previous = self._config
+        replacement = dc_replace(
+            previous,
+            pet=dc_replace(
+                previous.pet,
+                role_id=role_id.strip(),
+                role_package_version=0,
+                assets_dir=str(root),
+            ),
+        )
+        try:
+            profile = self._load_pet_frames(replacement.pet)
+            self._config = replacement
+            self._pet_window.set_edge_reveal_fraction(profile.edge_reveal_fraction)
+            self._feedback.set_click_lines(profile.click_lines)
+            self._feedback.restore_animation()
+            if not self._persist_config("internal 自定义角色 demo"):
+                raise RuntimeError("角色已预览，但配置未能保存")
+        except Exception as exc:
+            logger.exception("internal demo 角色切换失败: %s", exc)
+            self._config = previous
+            try:
+                old_profile = self._load_pet_frames(previous.pet)
+                self._pet_window.set_edge_reveal_fraction(
+                    old_profile.edge_reveal_fraction
+                )
+                self._feedback.set_click_lines(old_profile.click_lines)
+                self._feedback.restore_animation()
+            except Exception:
+                logger.exception("恢复上一个桌宠角色失败")
+            return False, str(exc)
+        return True, f"已切换为 {manifest.get('display_name', role_id)}"
+
+    def activate_managed_role(
+        self,
+        key: PackageKey,
+        *,
+        role_library: RoleLibrary | None = None,
+    ) -> tuple[bool, str]:
+        """Atomically activate one already validated managed role version."""
+        assert self._config is not None
+        assert self._pet_window is not None
+        assert self._feedback is not None
+        assert self._frame_controller is not None
+
+        library = role_library or RoleLibrary()
+        try:
+            installed = library.get(key)
+        except (OSError, RoleContractError) as exc:
+            return False, f"无法读取受管角色包：{exc}"
+
+        previous = self._config
+        replacement = dc_replace(
+            previous,
+            pet=dc_replace(
+                previous.pet,
+                role_id=key.role_id,
+                role_package_version=key.package_version,
+                assets_dir="",
+            ),
+        )
+        try:
+            candidate = FrameAnimationController()
+            profile = load_runtime_role_actions(
+                candidate,
+                installed.root,
+                fps=replacement.pet.fps,
+            )
+            if not candidate.has_action("idle"):
+                raise RuntimeError("受管角色缺少可用的 idle 动作")
+            self._frame_controller.replace_actions_from(candidate)
+            self._config = replacement
+            self._pet_window.set_edge_reveal_fraction(profile.edge_reveal_fraction)
+            self._feedback.set_click_lines(profile.click_lines)
+            self._feedback.restore_animation()
+            if not self._persist_config("受管自定义角色切换"):
+                raise RuntimeError("角色已加载，但配置未能保存")
+        except Exception as exc:
+            logger.exception("受管角色切换失败 %s: %s", key, exc)
+            self._config = previous
+            try:
+                old_profile = self._load_pet_frames(previous.pet)
+                self._pet_window.set_edge_reveal_fraction(
+                    old_profile.edge_reveal_fraction
+                )
+                self._feedback.set_click_lines(old_profile.click_lines)
+                self._feedback.restore_animation()
+            except Exception:
+                logger.exception("恢复上一个桌宠角色失败")
+            return False, str(exc)
+        return True, f"已切换为 {installed.package.display_name} v{key.package_version}"
 
     def _wire_signals(self) -> None:
         """接线所有子系统信号。"""
@@ -465,6 +640,9 @@ class MoeGuardApp(QObject):
         self._tray.toggle_patrol.connect(self._on_tray_toggle_patrol)
         self._tray.quit_requested.connect(self.quit)
         self._tray.open_settings.connect(self._on_open_settings)
+        self._tray.open_custom_role_workbench.connect(
+            self._on_open_custom_role_workbench
+        )
         self._tray.open_security_setup.connect(self._on_open_security_setup)
         self._tray.open_evidence.connect(self._on_open_evidence)
         self._tray.tray_activated.connect(self._on_tray_activated)
@@ -481,6 +659,9 @@ class MoeGuardApp(QObject):
         # 桌宠右键菜单 -> 应用
         self._pet_window.quit_requested.connect(self.quit)
         self._pet_window.settings_requested.connect(self._on_open_settings)
+        self._pet_window.custom_role_workbench_requested.connect(
+            self._on_open_custom_role_workbench
+        )
         self._pet_window.toggle_patrol_requested.connect(self._on_pet_toggle_patrol)
 
         # 反馈消息 -> 桌宠气泡
@@ -857,28 +1038,158 @@ class MoeGuardApp(QObject):
     def _on_open_settings(self) -> None:
         """打开设置面板，用户确认后更新配置并持久化。"""
         assert self._config is not None
+        if self._settings_dialog is not None:
+            self._settings_dialog.show()
+            self._settings_dialog.raise_()
+            self._settings_dialog.activateWindow()
+            return
+        self._reconcile_missing_managed_role()
         logger.info("打开设置面板")
 
-        dialog = SettingsDialog(self._config, parent=None)
+        dialog = SettingsDialog(
+            self._config,
+            parent=None,
+            custom_role_workbench_available=(
+                self._custom_role_workbench_factory is not None
+            ),
+            role_credit_dialog_available=(
+                self._role_credit_dialog_factory is not None
+            ),
+        )
         dialog.withdraw_patrol_consent_requested.connect(self._withdraw_patrol_consent)
         self.withdrawal_completed.connect(dialog.apply_withdrawal_result)
         dialog.manage_evidence_requested.connect(self._on_open_evidence_manager)
-        try:
-            accepted = dialog.exec() == SettingsDialog.Accepted
-        finally:
-            self.withdrawal_completed.disconnect(dialog.apply_withdrawal_result)
-        if accepted:
+        dialog.custom_role_workbench_requested.connect(
+            self._on_open_custom_role_workbench
+        )
+        dialog.role_credit_dialog_requested.connect(
+            self._on_open_role_credit_dialog
+        )
+        self._settings_dialog = dialog
+
+        def finish_settings(result: int) -> None:
+            try:
+                self.withdrawal_completed.disconnect(dialog.apply_withdrawal_result)
+            except (RuntimeError, TypeError):
+                pass
+            if self._settings_dialog is dialog:
+                self._settings_dialog = None
+            if result != SettingsDialog.Accepted:
+                dialog.deleteLater()
+                return
             if dialog.patrol_consent_withdrawn:
                 logger.info("撤回后忽略设置窗口中的旧值，保留已删除状态")
+                dialog.deleteLater()
                 return
             vals = dialog.values()
-            self._apply_settings(vals)
+            try:
+                self._apply_settings(vals)
+            except (OSError, RuntimeError, ValueError) as exc:
+                logger.warning("设置中的角色切换失败，保留当前角色: %s", exc)
+                assert self._tray is not None
+                self._tray.show_message(
+                    "角色切换失败",
+                    "所选角色包无法完整加载，当前角色和设置均未改变。",
+                    8000,
+                )
+                dialog.deleteLater()
+                return
             self._persist_config("设置修改")
             # 老板键变更后立即重新注册
             if "stealth_hotkey" in vals:
                 assert self._pet_window is not None
                 self._pet_window.register_stealth_hotkey(vals["stealth_hotkey"])
             logger.info("设置已保存")
+            dialog.deleteLater()
+
+        dialog.finished.connect(finish_settings)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _reconcile_missing_managed_role(self) -> None:
+        """Replace a vanished managed-role binding with the actual Lumen fallback.
+
+        A role directory can disappear after startup because of manual cleanup
+        or an interrupted external copy. The already decoded frames can keep
+        rendering, while a newly opened settings dialog sees only a stale
+        ``role_id@version``. Normalize both runtime and persisted configuration
+        before constructing that dialog.
+        """
+        assert self._config is not None
+        pet = self._config.pet
+        if pet.role_package_version <= 0:
+            return
+        try:
+            key = PackageKey(pet.role_id, pet.role_package_version)
+            RoleLibrary().get(key)
+            return
+        except (OSError, RoleContractError) as exc:
+            logger.warning("受管角色绑定已失效，回退到 Lumen: %s", exc)
+
+        replacement = dc_replace(
+            self._config,
+            pet=dc_replace(
+                pet,
+                role_id="lumen",
+                role_package_version=0,
+                assets_dir="",
+            ),
+        )
+        profile = self._load_pet_frames(replacement.pet)
+        self._config = replacement
+        if self._pet_window is not None:
+            self._pet_window.set_edge_reveal_fraction(profile.edge_reveal_fraction)
+        if self._feedback is not None:
+            self._feedback.set_click_lines(profile.click_lines)
+            self._feedback.restore_animation()
+        self._persist_config("失效角色绑定自动回退", notify=False)
+
+    def _on_open_custom_role_workbench(self) -> None:
+        """Open the injected support-edition workbench, if this build has one."""
+        factory = self._custom_role_workbench_factory
+        if factory is None:
+            return
+        if self._custom_role_workbench_dialog is not None:
+            self._custom_role_workbench_dialog.show()
+            self._custom_role_workbench_dialog.raise_()
+            self._custom_role_workbench_dialog.activateWindow()
+            return
+        dialog = factory()
+        self._custom_role_workbench_dialog = dialog
+
+        def finish_workbench(_result: int) -> None:
+            if self._custom_role_workbench_dialog is dialog:
+                self._custom_role_workbench_dialog = None
+            dialog.deleteLater()
+
+        dialog.finished.connect(finish_workbench)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _on_open_role_credit_dialog(self) -> None:
+        """Open support-edition generation balances and code redemption."""
+        factory = self._role_credit_dialog_factory
+        if factory is None:
+            return
+        if self._role_credit_dialog is not None:
+            self._role_credit_dialog.show()
+            self._role_credit_dialog.raise_()
+            self._role_credit_dialog.activateWindow()
+            return
+        dialog = factory()
+        self._role_credit_dialog = dialog
+
+        def finish_credit_dialog(_result: int) -> None:
+            if self._role_credit_dialog is dialog:
+                self._role_credit_dialog = None
+            dialog.deleteLater()
+
+        dialog.finished.connect(finish_credit_dialog)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _on_open_security_setup(self) -> None:
         """允许拒绝过引导的用户从托盘重新作出主动同意。"""
@@ -902,8 +1213,13 @@ class MoeGuardApp(QObject):
         """将设置对话框返回的值应用到 AppConfig（创建新的 frozen dataclass）。"""
         assert self._config is not None
 
-        old_role_source = (self._config.pet.role_id, self._config.pet.assets_dir)
-        self._config = dc_replace(
+        previous_config = self._config
+        old_role_source = (
+            previous_config.pet.role_id,
+            previous_config.pet.role_package_version,
+            previous_config.pet.assets_dir,
+        )
+        candidate_config = dc_replace(
             self._config,
             security=dc_replace(
                 self._config.security,
@@ -931,17 +1247,24 @@ class MoeGuardApp(QObject):
             pet=dc_replace(
                 self._config.pet,
                 role_id=vals["role_id"],
+                role_package_version=vals["role_package_version"],
                 assets_dir=vals["assets_dir"],
                 stealth_hotkey=vals["stealth_hotkey"],
             ),
         )
-        if (vals["role_id"], vals["assets_dir"]) != old_role_source:
-            profile = self._load_pet_frames(self._config.pet)
+        new_role_source = (
+            vals["role_id"],
+            vals["role_package_version"],
+            vals["assets_dir"],
+        )
+        if new_role_source != old_role_source:
+            profile = self._load_pet_frames(candidate_config.pet)
             assert self._pet_window is not None
             self._pet_window.set_edge_reveal_fraction(profile.edge_reveal_fraction)
             assert self._feedback is not None
             self._feedback.set_click_lines(profile.click_lines)
             self._feedback.restore_animation()
+        self._config = candidate_config
         assert self._face_worker is not None
         self._face_worker.set_motion_recording_enabled(
             vals["motion_recording_enabled"]
@@ -1297,9 +1620,23 @@ class MoeGuardApp(QObject):
     # 退出
     # ------------------------------------------------------------------ #
 
-    def quit(self) -> None:
-        """优雅退出：释放摄像头、保存配置、关闭 db、释放资源。"""
+    def shutdown(self) -> None:
+        """Release native and background resources before QApplication teardown."""
+        if self._shutdown_started:
+            return
+        self._shutdown_started = True
         logger.info("正在退出萌卫...")
+
+        for dialog in (
+            self._settings_dialog,
+            self._custom_role_workbench_dialog,
+            self._role_credit_dialog,
+        ):
+            if dialog is not None:
+                dialog.close()
+        self._settings_dialog = None
+        self._custom_role_workbench_dialog = None
+        self._role_credit_dialog = None
 
         recorder_stopped = True
         if self._evidence is not None:
@@ -1334,6 +1671,41 @@ class MoeGuardApp(QObject):
         if self._frame_controller is not None:
             self._frame_controller.stop()
 
+        if self._evidence_maintenance_timer is not None:
+            self._evidence_maintenance_timer.stop()
+        preview_timer = getattr(self, "_preview_timer", None)
+        if preview_timer is not None:
+            preview_timer.stop()
+
+        if self._onboarding is not None:
+            self._onboarding.hide()
+            self._onboarding.deleteLater()
+            self._onboarding = None
+        if self._patrol_banner is not None:
+            self._patrol_banner.hide()
+            self._patrol_banner.deleteLater()
+            self._patrol_banner = None
+        if self._pet_window is not None:
+            self._pet_window.shutdown()
+            self._pet_window.deleteLater()
+            self._pet_window = None
+        if self._tray is not None:
+            self._tray.shutdown()
+            self._tray.deleteLater()
+            self._tray = None
+
+        # Workbenches, settings/evidence dialogs and message boxes are
+        # top-level native windows.  They may still exist when exit is
+        # requested from the tray, so retire them before the Windows platform
+        # plugin is torn down.  ``hide`` avoids business close guards during a
+        # deliberate process shutdown; ``deleteLater`` keeps deletion on the
+        # Qt GUI thread.
+        app = QApplication.instance()
+        if app is not None:
+            for widget in app.topLevelWidgets():
+                widget.hide()
+                widget.deleteLater()
+
         # 保存配置
         if self._config is not None:
             self._persist_config("退出前保存", notify=False)
@@ -1341,6 +1713,19 @@ class MoeGuardApp(QObject):
         # 关闭数据库
         if self._db is not None:
             self._db.close()
+
+        # Native Windows tray/menu/window handles must be destroyed while the
+        # QApplication and platform plugin are still alive.  Deferring this to
+        # Python interpreter teardown can access an already-released Qt object.
+        if app is not None:
+            QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+            app.processEvents()
+
+        logger.info("萌卫资源已释放")
+
+    def quit(self) -> None:
+        """Gracefully release resources, then leave the Qt event loop."""
+        self.shutdown()
 
         # 退出应用
         app = QApplication.instance()
@@ -1350,16 +1735,25 @@ class MoeGuardApp(QObject):
         logger.info("萌卫已退出")
 
 
-def run(argv: list[str]) -> int:
+def run(
+    argv: list[str],
+    *,
+    configure: Callable[[MoeGuardApp], None] | None = None,
+) -> int:
     """创建 QApplication 并运行萌卫，返回退出码。"""
     setup_logging()
     app = QApplication(argv)
     app.setApplicationName("MoeGuard")
     app.setApplicationDisplayName("萌卫")
+    companion_icon, _patrol_icon = application_icons()
+    app.setWindowIcon(companion_icon)
     # 桌宠/托盘应用：关闭窗口不应退出进程
     app.setQuitOnLastWindowClosed(False)
 
     moeguard = MoeGuardApp()
+    app.aboutToQuit.connect(moeguard.shutdown)
+    if configure is not None:
+        configure(moeguard)
     moeguard.start()
 
     return app.exec()

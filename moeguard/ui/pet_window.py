@@ -2,7 +2,7 @@
 
 承载 QPixmap 序列帧动画渲染控件与文字气泡，支持：
 - 鼠标拖动改变桌宠位置。
-- 边缘吸附（半免打扰）：拖到屏幕边缘触发探出 / 下垂 / 扒状态栏行为。
+- 屏幕边缘吸附（半免打扰）：显示器上下左右四边只露局部。
 - 完全免打扰：隐藏桌宠，程序后台运行。
 - 点击触摸反应（mousePressEvent -> emit clicked 信号）。
 - 老板键/伪装模式（D18）：全局热键一键收缩为极简悬浮件。
@@ -36,6 +36,7 @@ _MAX_HEIGHT = 768
 _DEFAULT_FPS = 6  # T1.6 定稿 25帧@6fps
 _BUBBLE_TIMEOUT_MS = 5000  # 气泡自动消失时间
 _BUBBLE_CONTENT_GAP = 24  # 气泡底边与角色可见 bbox 顶边的固定间距
+_SCREEN_EDGE_HEAD_REVEAL_PIXELS = 64  # 上下边缘固定只露出 bbox 顶部像素
 _STEALTH_KEY = "Ctrl+Shift+H"  # D18 老板键热键
 
 
@@ -76,12 +77,13 @@ def edge_snap_position(
     content_rect: QRect,
     direction: str,
     reveal_fraction: float,
+    *,
+    reveal_pixels: int | None = None,
 ) -> QPoint:
     """Place visible character content against any rectangular interaction surface.
 
-    ``surface`` is the desktop work area today.  A future application-window
-    tracker can supply its client/window rectangle without changing the edge
-    choreography or role assets.
+    The current caller passes the display work area. Future window-edge support
+    can pass an application rectangle without changing this geometry contract.
     """
     if direction not in {"left", "right", "top", "bottom"}:
         raise ValueError(f"unknown edge direction: {direction}")
@@ -89,7 +91,15 @@ def edge_snap_position(
         0, 0, window_rect.width(), window_rect.height()
     )
     center_x = content.x() + content.width() / 2
-    reveal = max(1, round(content.height() * reveal_fraction))
+    reveal = max(
+        1,
+        min(
+            content.height(),
+            int(reveal_pixels)
+            if reveal_pixels is not None
+            else round(content.height() * reveal_fraction),
+        ),
+    )
     if direction == "left":
         return QPoint(round(surface.left() - center_x), window_rect.y())
     if direction == "right":
@@ -112,7 +122,7 @@ class PetWindow(QWidget):
     支持拖动、边缘吸附、点击反应、老板键伪装、滚轮缩放。
 
     信号:
-        edge_snapped: 边缘吸附方向（left/right/top/bottom）。
+        edge_snapped: 屏幕边缘吸附方向（left/right/top/bottom）。
         clicked: 桌宠被点击（左键单击）。
         drag_started: 拖拽开始。
         drag_ended: 拖拽结束。
@@ -130,16 +140,18 @@ class PetWindow(QWidget):
     stealth_toggled = Signal(bool)
     quit_requested = Signal()
     settings_requested = Signal()
+    custom_role_workbench_requested = Signal()
     toggle_patrol_requested = Signal()
 
     def __init__(
         self,
         frame_controller: FrameAnimationController | None = None,
         fps: int = _DEFAULT_FPS,
-        edge_reveal_fraction: float = 0.42,
+        edge_reveal_fraction: float = 1 / 6,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self._shutdown_started = False
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )
@@ -148,11 +160,14 @@ class PetWindow(QWidget):
 
         # 帧动画控制器
         self._fps = fps
+        self._custom_role_workbench_available = False
         self._frame_controller = frame_controller or FrameAnimationController(self)
         self._frame_controller.animation_changed.connect(self._on_animation_changed)
         self.set_edge_reveal_fraction(edge_reveal_fraction)
         self._edge_surface: QRect | None = None
         self._edge_direction: str | None = None
+        self._edge_anchor_content_rect: QRect | None = None
+        self._edge_anchor_reveal_pixels: int | None = None
 
         # 文字气泡：独立浮窗，每次 show_message 时创建/销毁
         self._bubble: _MessageBubble | None = None
@@ -231,8 +246,8 @@ class PetWindow(QWidget):
 
     def set_edge_reveal_fraction(self, value: float) -> None:
         """Set how much character height remains visible at top/bottom edges."""
-        if not 0.15 <= value <= 0.75:
-            raise ValueError("edge_reveal_fraction must be between 0.15 and 0.75")
+        if not 0.10 <= value <= 0.75:
+            raise ValueError("edge_reveal_fraction must be between 0.10 and 0.75")
         self._edge_reveal_fraction = float(value)
 
     def _check_animation_finished(self) -> None:
@@ -331,6 +346,9 @@ class PetWindow(QWidget):
     def resizeEvent(self, event) -> None:  # noqa: N802
         """桌宠缩放时让气泡继续锚定角色，而不是旧窗口尺寸。"""
         super().resizeEvent(event)
+        if getattr(self, "_edge_surface", None) is not None:
+            self._capture_surface_anchor()
+            self._maintain_surface_snap()
         self._reposition_bubble()
 
     # ------------------------------------------------------------------ #
@@ -430,6 +448,18 @@ class PetWindow(QWidget):
         self.show()
         self._paint_timer.start()
 
+    def shutdown(self) -> None:
+        """Stop timers and top-level helpers before the native Qt app exits."""
+        if self._shutdown_started:
+            return
+        self._shutdown_started = True
+        self._paint_timer.stop()
+        self._bubble_timer.stop()
+        self._long_press_timer.stop()
+        self.unregister_stealth_hotkey()
+        self.hide_message()
+        self.hide()
+
     # ------------------------------------------------------------------ #
     # 绘制
     # ------------------------------------------------------------------ #
@@ -522,8 +552,10 @@ class PetWindow(QWidget):
         self._press_pos = None
 
     def _check_edge_snap(self) -> None:
-        """拖动结束时检测是否靠近屏幕边缘，触发吸附（半免打扰）。"""
-        screen = self.screen().availableGeometry() if self.screen() else None
+        """拖动结束时检测显示器的固定上下左右四边。"""
+        # “屏幕边缘”指显示器的物理四边。availableGeometry() 会排除任务栏，
+        # 但置顶透明窗口不会在任务栏边界被裁切，反而会额外露出整段任务栏高度。
+        screen = self.screen().geometry() if self.screen() else None
         if screen is None:
             return
         pos = self.pos()
@@ -534,9 +566,9 @@ class PetWindow(QWidget):
         elif pos.x() + self.width() >= screen.right() - _EDGE_SNAP_MARGIN:
             direction = "right"  # 探出右半身
         elif pos.y() <= screen.top() + _EDGE_SNAP_MARGIN:
-            direction = "top"  # 重力下垂
+            direction = "top"  # 倒挂向下探头
         elif pos.y() + self.height() >= screen.bottom() - _EDGE_SNAP_MARGIN:
-            direction = "bottom"  # 扒状态栏
+            direction = "bottom"  # 正常向上探头
 
         if direction:
             self.edge_snapped.emit(direction)
@@ -545,19 +577,21 @@ class PetWindow(QWidget):
     def snap_to_surface(self, surface: QRect, direction: str) -> None:
         """Attach to an arbitrary target rectangle using current visible content.
 
-        The base edition calls this with the desktop work area.  Future editions
-        may pass an application-window rectangle after their own target discovery.
+        The current runtime passes the display work area and one of its four
+        fixed edges. A future window tracker may reuse this explicit rectangle
+        API, but v0.2 does not discover or follow application windows.
         """
         self._edge_surface = QRect(surface)
         self._edge_direction = direction
-        content = self._current_content_rect()
+        self._capture_surface_anchor()
         self.move(
             edge_snap_position(
                 self._edge_surface,
                 self.geometry(),
-                content,
+                self._edge_anchor_content_rect or self.rect(),
                 direction,
                 self._edge_reveal_fraction,
+                reveal_pixels=self._edge_anchor_reveal_pixels,
             )
         )
 
@@ -565,6 +599,24 @@ class PetWindow(QWidget):
         """Stop edge anchoring before free dragging or a mode change."""
         self._edge_surface = None
         self._edge_direction = None
+        self._edge_anchor_content_rect = None
+        self._edge_anchor_reveal_pixels = None
+
+    def _capture_surface_anchor(self) -> None:
+        """Freeze one alpha bbox and vertical reveal amount for this snap.
+
+        Generated animation frames often have slightly different transparent
+        bounds. Recalculating the edge position from every frame makes the pet
+        drift and can reveal most of a short frame. Screen top/bottom instead
+        expose a fixed number of pixels from the captured character bbox.
+        """
+        content = self._current_content_rect()
+        self._edge_anchor_content_rect = QRect(content)
+        self._edge_anchor_reveal_pixels = (
+            min(_SCREEN_EDGE_HEAD_REVEAL_PIXELS, max(1, content.height()))
+            if self._edge_direction in {"top", "bottom"}
+            else None
+        )
 
     def _current_content_rect(self) -> QRect:
         """Measure the current frame's alpha bbox in window-local coordinates."""
@@ -585,15 +637,18 @@ class PetWindow(QWidget):
         return mask_rect.translated(x, y)
 
     def _maintain_surface_snap(self) -> None:
-        """Keep a stable visible amount as animated alpha bounds change per frame."""
+        """Keep the one captured snap anchor stable while frames animate."""
         if self._edge_surface is None or self._edge_direction is None:
             return
+        if self._edge_anchor_content_rect is None:
+            self._capture_surface_anchor()
         desired = edge_snap_position(
             self._edge_surface,
             self.geometry(),
-            self._visible_content_rect or self.rect(),
+            self._edge_anchor_content_rect or self.rect(),
             self._edge_direction,
             self._edge_reveal_fraction,
+            reveal_pixels=self._edge_anchor_reveal_pixels,
         )
         if self.pos() != desired:
             self.move(desired)
@@ -602,8 +657,12 @@ class PetWindow(QWidget):
     # 右键菜单
     # ------------------------------------------------------------------ #
 
-    def contextMenuEvent(self, event) -> None:  # noqa: N802
-        """右键弹出快捷菜单。"""
+    def set_custom_role_workbench_available(self, available: bool) -> None:
+        """设置右键菜单是否显示 v0.2 桌宠工坊直达入口。"""
+        self._custom_role_workbench_available = bool(available)
+
+    def _build_context_menu(self):
+        """构建可测试的桌宠快捷菜单。"""
         from PySide6.QtWidgets import QMenu
 
         menu = QMenu(self)
@@ -616,8 +675,20 @@ class PetWindow(QWidget):
         act_patrol = menu.addAction("进入值守 / 回到陪伴")
         act_patrol.triggered.connect(self.toggle_patrol_requested.emit)
 
+        if self._custom_role_workbench_available:
+            act_custom_role = menu.addAction("桌宠工坊…")
+            act_custom_role.triggered.connect(
+                self.custom_role_workbench_requested.emit
+            )
+
         act_settings = menu.addAction("设置")
         act_settings.triggered.connect(self.settings_requested.emit)
+
+        return menu
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802
+        """右键弹出快捷菜单。"""
+        menu = self._build_context_menu()
 
         menu.exec(event.globalPos())
 

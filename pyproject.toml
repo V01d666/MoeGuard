@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moeguard"
-version = "0.1.0"
+version = "0.2.0-preview"
 description = "萌卫 MoeGuard — 二次元虚拟桌宠 × 智能安防"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -36,7 +36,8 @@ dev = [
     "ruff>=0.4",
 ]
 [project.scripts]
-moeguard = "moeguard.main:main"
+moeguard = "moeguard.role_main:main"
+moeguard-role = "moeguard.role_main:main"
 
 [tool.setuptools.packages.find]
 include = ["moeguard*", "resources"]

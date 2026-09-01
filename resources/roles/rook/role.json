@@ -10,7 +10,8 @@
   ],
   "distribution_ready": true,
   "interaction": {
-    "edge_reveal_fraction": 0.45,
+    "edge_reveal_fraction": 0.16666666666666666,
+    "head_body_ratio": 3,
     "peek_action_semantics": "viewer_direction"
   },
   "dialogue": {

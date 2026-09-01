@@ -216,6 +216,18 @@ class FrameAnimationController(QObject):
         self._ping_pong = False
         self._playback_finished_callback = None
 
+    def replace_actions_from(self, candidate: FrameAnimationController) -> None:
+        """Atomically adopt a fully loaded candidate without changing this object.
+
+        PetWindow and FeedbackController retain their reference to this
+        controller. Callers must validate the candidate before committing it.
+        """
+        if not candidate.has_action("idle"):
+            raise ValueError("candidate role has no usable idle action")
+        candidate.stop()
+        self.clear_actions()
+        self._actions = dict(candidate._actions)
+
     # ------------------------------------------------------------------ #
     # 播放控制
     # ------------------------------------------------------------------ #

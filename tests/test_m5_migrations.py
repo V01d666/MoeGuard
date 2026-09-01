@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from moeguard.config import AppConfig
+from moeguard.config import AppConfig, PetConfig
 from moeguard.storage.db import Database
 
 
@@ -77,6 +77,43 @@ def test_config_save_returns_success_and_roundtrips(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     assert AppConfig.save(AppConfig(), path)
     assert AppConfig.load(path) == AppConfig()
+
+
+def test_managed_role_package_key_roundtrips_without_assets_path(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    config = AppConfig(
+        pet=PetConfig(
+            role_id="custom-whale",
+            role_package_version=3,
+            assets_dir="",
+        )
+    )
+
+    assert AppConfig.save(config, path)
+    loaded = AppConfig.load(path)
+
+    assert loaded.pet.role_id == "custom-whale"
+    assert loaded.pet.role_package_version == 3
+    assert loaded.pet.assets_dir == ""
+
+
+@pytest.mark.parametrize("invalid", [True, -1, "3"])
+def test_invalid_managed_role_version_falls_back_to_bundled_mode(
+    tmp_path: Path, invalid
+) -> None:
+    path = tmp_path / "config.toml"
+    if invalid is True:
+        rendered = "true"
+    elif isinstance(invalid, str):
+        rendered = f'"{invalid}"'
+    else:
+        rendered = str(invalid)
+    path.write_text(
+        f"[pet]\nrole_id = \"custom-whale\"\nrole_package_version = {rendered}\n",
+        encoding="utf-8",
+    )
+
+    assert AppConfig.load(path).pet.role_package_version == 0
 
 
 def test_legacy_database_migrates_idempotently_and_preserves_events(tmp_path: Path) -> None:
