@@ -663,7 +663,11 @@ class RoleTaskArtifactStore:
             self._tree_digest(destination)
             return destination
         destination.parent.mkdir(parents=True, exist_ok=True)
-        staging = destination.parent / f".{destination.name}.staging-{uuid.uuid4().hex}"
+        # Do not repeat the 64-character task digest in the temporary leaf.
+        # This store can wrap another atomic downloader, and nested verbose
+        # staging names exceeded the legacy Windows MAX_PATH boundary for
+        # users with longer profile directories.
+        staging = destination.parent / f".artifact-{uuid.uuid4().hex}"
         try:
             builder(staging)
             self._tree_digest(staging)

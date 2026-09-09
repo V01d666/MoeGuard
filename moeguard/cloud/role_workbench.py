@@ -4221,8 +4221,9 @@ class RoleWorkbenchDialog(QDialog):
         self.status.setText(f"任务未完成：{message}")
         QMessageBox.critical(
             self,
-            "自定义角色任务未完成",
-            f"{message}\n\n已落盘的 task、原视频和账本会保留；请先恢复，不要直接重提。",
+            "桌宠工坊任务未完成",
+            f"{message}\n\n任务状态和已完成的远端结果会保留；"
+            "请点击“恢复失败任务”，不要重新生成。",
         )
 
     def _on_operation_success(

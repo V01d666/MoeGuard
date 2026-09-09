@@ -253,6 +253,34 @@ def test_public_role_service_errors_have_stable_user_copy(error: Exception, expe
     assert "I2V" not in message
 
 
+@pytest.mark.parametrize(
+    "error, expected",
+    [
+        (
+            FileNotFoundError(
+                2,
+                "No such file or directory",
+                r"C:\Users\PrivateUser\.moeguard\task-artifacts\candidate.png",
+            ),
+            "本地任务文件处理失败",
+        ),
+        (
+            RuntimeError("provider receipt and private implementation detail"),
+            "任务处理未完成",
+        ),
+    ],
+)
+def test_unexpected_role_service_errors_do_not_echo_private_details(
+    error: Exception, expected: str
+) -> None:
+    message = role_service_user_message(error)
+
+    assert expected in message
+    assert "PrivateUser" not in message
+    assert "candidate.png" not in message
+    assert "provider receipt" not in message
+
+
 class _JsonResponse:
     def __init__(self, data: dict) -> None:
         self._payload = json.dumps(

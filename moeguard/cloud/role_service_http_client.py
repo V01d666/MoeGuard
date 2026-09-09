@@ -179,7 +179,12 @@ def role_service_user_message(error: object) -> str:
         if error.status >= 500:
             return "角色生成服务暂时不可用。请稍后恢复同一任务，不要重新提交。"
         return "角色生成服务拒绝了当前请求，请检查角色设定后重试。"
-    return str(error)
+    if isinstance(error, OSError):
+        return "本地任务文件处理失败。请恢复同一任务；若仍失败，请重启萌卫后再试。"
+    # Background exceptions can contain local account names, filesystem paths,
+    # provider details or implementation messages.  The UI must never echo
+    # those internals; diagnostics belong in private logs and tests instead.
+    return "任务处理未完成。请恢复同一任务；若仍失败，请重启萌卫后再试。"
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -228,7 +233,13 @@ def _tree_digest(root: Path) -> str:
 def _extract_result_archive(payload: bytes, destination: Path) -> str:
     if destination.exists():
         raise ValueError("HTTP result destination must not already exist")
-    staging = destination.with_name(destination.name + f".staging-{uuid.uuid4().hex}")
+    # Keep the temporary leaf independent from ``destination.name``.  The
+    # caller already publishes into a task-artifact staging directory whose
+    # name contains a 64-character task digest.  Repeating that name here can
+    # push an otherwise ordinary candidate path beyond the legacy Windows
+    # MAX_PATH boundary (260 characters), where pathlib then reports the file
+    # as missing even though the download itself succeeded.
+    staging = destination.parent / f".download-{uuid.uuid4().hex}"
     staging.mkdir(parents=True, exist_ok=False)
     try:
         total = 0
