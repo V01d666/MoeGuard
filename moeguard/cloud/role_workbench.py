@@ -12,6 +12,7 @@ import platform
 import random
 import re
 import shutil
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -23,7 +24,7 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from PIL import Image
 from PySide6.QtCore import QSettings, QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QIcon, QMovie, QPixmap
+from PySide6.QtGui import QCloseEvent, QHideEvent, QIcon, QMovie, QPixmap, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -63,6 +64,8 @@ from moeguard.cloud.role_service import (
 )
 from moeguard.cloud.role_service_http_client import (
     RoleServiceAccountSummary,
+    RoleServiceConnectionError,
+    RoleServiceHttpError,
     role_service_user_message,
 )
 from moeguard.roles import (
@@ -76,7 +79,7 @@ from moeguard.roles import (
     build_package_revision,
 )
 from moeguard.roles.drafts import RoleDraft, RoleDraftStore, normalized_identity_png
-from moeguard.roles.errors import RoleContractError
+from moeguard.roles.errors import ContractErrorCode, RoleContractError
 from moeguard.roles.package import RolePackage, load_role_package
 from moeguard.roles.profile import CharacterProfile, ProfileInput, VisualIdentity
 from moeguard.roles.spec import (
@@ -97,6 +100,22 @@ _ACTIVITY_FACES = (
 )
 
 ProgressCallback = Callable[[str, int], None]
+
+
+class ClientEventReporter(Protocol):
+    def start_journey(self) -> str: ...
+
+    def record(
+        self,
+        event_name: str,
+        *,
+        remote_task_id: str = "",
+        properties: dict[str, object] | None = None,
+    ) -> bool: ...
+
+    def flush_async(self) -> bool: ...
+
+
 _ROLE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{2,47}$")
 _PRESENTATION_LABELS = (
     ("男性", "masculine"),
@@ -1217,6 +1236,8 @@ class RoleWorkbenchDialog(QDialog):
         generation_unavailable_message: str = "",
         binding_available: bool = False,
         service_unbinding_available: bool = False,
+        client_events: ClientEventReporter | None = None,
+        client_event_entrypoint: str = "settings",
     ) -> None:
         super().__init__(parent)
         self._backend = backend
@@ -1246,6 +1267,20 @@ class RoleWorkbenchDialog(QDialog):
         self._preview_root: Path | None = None
         self._preview_movie: QMovie | None = None
         self._selected_image_path = ""
+        self._client_events = client_events
+        self._client_event_entrypoint = client_event_entrypoint
+        self._client_event_lock = threading.RLock()
+        self._client_event_once_keys: set[str] = set()
+        self._client_event_session_exposures: set[str] = set()
+        self._client_event_candidate_selections: set[str] = set()
+        self._client_event_opened = False
+        self._client_event_flow_started = False
+        self._client_event_wait_started = 0.0
+        self._client_event_recovery_started = 0.0
+        self._client_event_retry_count = 0
+        self._client_event_recovery_task_id = ""
+        self._last_installed_remote_task_id = ""
+        self._client_event_home_visible = False
         self._settings = QSettings("MoeGuard", "CustomRoleDemo")
         task_state_root = backend.storage_root / "state"
         self._draft_store = draft_store or RoleDraftStore(task_state_root)
@@ -1277,6 +1312,11 @@ class RoleWorkbenchDialog(QDialog):
                 self._task_artifacts,
                 RoleServiceBindingStore(task_state_root / "service-bindings"),
                 RoleServiceRequestStore(task_state_root / "service-requests"),
+                result_event_callback=(
+                    self._on_service_result_event
+                    if client_events is not None
+                    else None
+                ),
             )
             if service_transport is not None
             else None
@@ -1871,6 +1911,9 @@ class RoleWorkbenchDialog(QDialog):
         self._activity_timer = QTimer(self)
         self._activity_timer.setInterval(1600)
         self._activity_timer.timeout.connect(self._rotate_activity_indicator)
+        self._client_event_timer = QTimer(self)
+        self._client_event_timer.setInterval(30_000)
+        self._client_event_timer.timeout.connect(self._client_event_tick)
         self.status = QLabel("先填写角色设定，然后准备身份候选。")
         self.status.setWordWrap(True)
         left_layout.addWidget(self.activity_indicator)
@@ -1886,6 +1929,7 @@ class RoleWorkbenchDialog(QDialog):
         self.candidates.setResizeMode(QListView.Adjust)
         self.candidates.setMaximumHeight(210)
         self.candidates.currentRowChanged.connect(self._candidate_selected)
+        self.candidates.itemClicked.connect(self._candidate_clicked)
         right_layout.addWidget(self.candidates)
 
         preview_column = QVBoxLayout()
@@ -1968,6 +2012,219 @@ class RoleWorkbenchDialog(QDialog):
             self._show_home()
         self._apply_generation_availability()
 
+    def _client_event_stage(self) -> str:
+        if self._client_event_home_visible:
+            return "role_library"
+        return {
+            1: "create_identity",
+            2: "select_animate",
+            3: "preview_install",
+        }.get(self._ui_stage, "role_library")
+
+    def _client_event_foreground(self) -> bool:
+        return bool(
+            self.isVisible()
+            and (self.isActiveWindow() or QApplication.activeWindow() is self)
+        )
+
+    @staticmethod
+    def _client_event_operation(
+        context: _WorkbenchTaskContext | None,
+    ) -> str | None:
+        return context.operation if context is not None else None
+
+    def _record_client_event(
+        self,
+        event_name: str,
+        *,
+        remote_task_id: str = "",
+        properties: dict[str, object] | None = None,
+        once_key: str = "",
+    ) -> bool:
+        reporter = self._client_events
+        if reporter is None:
+            return False
+        with self._client_event_lock:
+            if once_key and once_key in self._client_event_once_keys:
+                return False
+            payload = {
+                "screen": "pet_workshop",
+                "stage": self._client_event_stage(),
+                **dict(properties or {}),
+            }
+            try:
+                recorded = reporter.record(
+                    event_name,
+                    remote_task_id=remote_task_id,
+                    properties=payload,
+                )
+            except Exception:
+                return False
+            if recorded and once_key:
+                self._client_event_once_keys.add(once_key)
+            return recorded
+
+    def _start_client_event_journey(
+        self, entrypoint: str = "workbench", *, record_opened: bool = True
+    ) -> None:
+        reporter = self._client_events
+        if reporter is None:
+            return
+        try:
+            reporter.start_journey()
+        except Exception:
+            return
+        with self._client_event_lock:
+            self._client_event_once_keys.clear()
+            self._client_event_flow_started = False
+            self._client_event_retry_count = 0
+            self._client_event_recovery_task_id = ""
+            self._last_installed_remote_task_id = ""
+        if record_opened:
+            self._record_client_event(
+                "workbench_opened",
+                properties={"entrypoint": entrypoint, "foreground": True},
+                once_key="workbench_opened",
+            )
+
+    def _ensure_flow_started(self, context: _WorkbenchTaskContext) -> None:
+        with self._client_event_lock:
+            if self._client_event_flow_started:
+                return
+        if self._record_client_event(
+            "flow_started",
+            properties={
+                "operation": context.operation,
+                "input_kind": context.request.input_mode,
+            },
+            once_key="flow_started",
+        ):
+            with self._client_event_lock:
+                self._client_event_flow_started = True
+
+    def _remote_task_id(self, local_task_id: str) -> str:
+        if not local_task_id or self._service_client is None:
+            return ""
+        try:
+            binding = self._service_client.binding_store.load(local_task_id)
+        except (OSError, ValueError):
+            return ""
+        return binding.remote_task_id if binding is not None else ""
+
+    def _on_service_result_event(
+        self, event_name: str, local_task_id: str, remote_task_id: str
+    ) -> None:
+        try:
+            context = self._task_contexts.load(local_task_id)
+        except (OSError, ValueError):
+            context = None
+        properties: dict[str, object] = {}
+        operation = self._client_event_operation(context)
+        if operation is not None:
+            properties["operation"] = operation
+        if event_name == "result_verified" and context is not None:
+            properties["package_ready"] = context.result_kind == "package"
+        self._record_client_event(
+            event_name,
+            remote_task_id=remote_task_id,
+            properties=properties,
+            once_key=f"{local_task_id}:{event_name}",
+        )
+
+    @staticmethod
+    def _client_error_code(error: object) -> str:
+        if isinstance(error, RoleServiceConnectionError):
+            return (
+                "service_timeout"
+                if error.code == "service_timeout"
+                else "network_unavailable"
+            )
+        if isinstance(error, RoleServiceHttpError):
+            if error.status in {401, 403} or error.code == "invalid_token":
+                return "authentication_failed"
+            if error.status == 413:
+                return "request_too_large"
+            if error.status >= 500:
+                return "service_unavailable"
+            return "request_rejected"
+        if isinstance(error, RoleContractError):
+            return {
+                ContractErrorCode.HASH_MISMATCH: "hash_mismatch",
+                ContractErrorCode.UNSAFE_ARCHIVE: "archive_invalid",
+                ContractErrorCode.RESOURCE_LIMIT: "request_too_large",
+                ContractErrorCode.NOT_FOUND: "task_not_found",
+            }.get(error.code, "invalid_result")
+        if isinstance(error, OSError):
+            return "local_storage_failed"
+        return "task_failed"
+
+    def _client_event_tick(self) -> None:
+        reporter = self._client_events
+        if reporter is None:
+            return
+        try:
+            reporter.flush_async()
+        except Exception:
+            pass
+        if (
+            self._worker is None
+            or not self._worker.isRunning()
+            or not self._client_event_foreground()
+        ):
+            return
+        duration_ms = max(
+            0, min(int((time.monotonic() - self._client_event_wait_started) * 1000), 604_800_000)
+        )
+        self._record_client_event(
+            "wait_heartbeat",
+            remote_task_id=self._remote_task_id(self._active_task_id),
+            properties={"foreground": True, "duration_ms": duration_ms},
+        )
+
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
+        super().showEvent(event)
+        if self._client_events is None:
+            return
+        if not self._client_event_opened:
+            self._client_event_opened = True
+            self._start_client_event_journey(
+                self._client_event_entrypoint, record_opened=False
+            )
+            runtime = self._client_runtime
+            self._record_client_event(
+                "preview_session_started",
+                properties={
+                    "entrypoint": self._client_event_entrypoint,
+                    "foreground": True,
+                    "windows_major": runtime.windows_major,
+                    "architecture": runtime.architecture,
+                    "display_scale_percent": runtime.display_scale_percent,
+                },
+                once_key="preview_session_started",
+            )
+            self._record_client_event(
+                "workbench_opened",
+                properties={
+                    "entrypoint": self._client_event_entrypoint,
+                    "foreground": True,
+                },
+                once_key="workbench_opened",
+            )
+            self._client_event_timer.start()
+
+    def hideEvent(self, event: QHideEvent) -> None:  # noqa: N802
+        if self._worker is not None and self._worker.isRunning():
+            self._record_client_event(
+                "wait_interrupted",
+                remote_task_id=self._remote_task_id(self._active_task_id),
+                properties={
+                    "foreground": False,
+                    "reason": "window_hidden",
+                    "retry_count": self._client_event_retry_count,
+                },
+            )
+        super().hideEvent(event)
+
     def _generation_consumes_units(self) -> bool:
         return not self._backend.is_fake or self._remote_generation_consumes_units
 
@@ -1989,6 +2246,7 @@ class RoleWorkbenchDialog(QDialog):
         if stage not in {1, 2, 3}:
             raise ValueError("工作台阶段必须为 1、2 或 3")
         self._ui_stage = stage
+        self._client_event_home_visible = False
         self.home_panel.setVisible(False)
         self.stage_bar.setVisible(True)
         self.workflow_body.setVisible(True)
@@ -2029,6 +2287,7 @@ class RoleWorkbenchDialog(QDialog):
         if not isinstance(self.edit_role_selector.currentData(), PackageKey):
             self.edit_role_selector.setCurrentIndex(1)
         self.home_panel.setVisible(True)
+        self._client_event_home_visible = True
         self.edit_role_controls.setVisible(True)
         self.stage_bar.setVisible(False)
         self.workflow_body.setVisible(False)
@@ -2048,6 +2307,7 @@ class RoleWorkbenchDialog(QDialog):
     def _begin_new_role_from_home(self) -> None:
         if not self._confirm_leave_unsaved_result("创建新角色"):
             return
+        self._start_client_event_journey()
         self.new_role_mode.blockSignals(True)
         self.edit_role_mode.blockSignals(True)
         self.new_role_mode.setChecked(True)
@@ -2156,6 +2416,7 @@ class RoleWorkbenchDialog(QDialog):
         if not self._confirm_leave_unsaved_result("新建角色"):
             self.edit_role_mode.setChecked(True)
             return
+        self._start_client_event_journey()
         self.edit_role_selector.setCurrentIndex(0)
         self.edit_role_controls.setVisible(False)
         self._reset_new_role()
@@ -2231,6 +2492,7 @@ class RoleWorkbenchDialog(QDialog):
             )
             return
         try:
+            self._start_client_event_journey()
             self.open_installed_role(selected)
         except (OSError, RoleContractError, ValueError) as exc:
             QMessageBox.critical(
@@ -2259,6 +2521,7 @@ class RoleWorkbenchDialog(QDialog):
         if not self._confirm_leave_unsaved_result("修改其它角色的形象"):
             return
         try:
+            self._start_client_event_journey()
             self.start_appearance_revision(selected)
         except (OSError, RoleContractError, ValueError) as exc:
             QMessageBox.critical(
@@ -3123,6 +3386,38 @@ class RoleWorkbenchDialog(QDialog):
         self._task_contexts.set_active(record.local_task_id)
         self._active_task_id = record.local_task_id
         self._active_task_context = context
+        self._ensure_flow_started(context)
+        if context.result_kind == "candidates":
+            self._record_client_event(
+                "candidate_submit_clicked",
+                properties={
+                    "operation": context.operation,
+                    "input_kind": context.request.input_mode,
+                    "candidate_count": context.request.candidate_count,
+                },
+                once_key=f"{record.local_task_id}:candidate_submit_clicked",
+            )
+        else:
+            actions = list(context.actions)
+            if self._candidate_task_id and self.candidates.currentRow() >= 0:
+                self._record_candidate_selection(self.candidates.currentRow())
+            self._record_client_event(
+                "package_submit_clicked",
+                properties={
+                    "operation": context.operation,
+                    "input_kind": context.request.input_mode,
+                    "action_names": actions,
+                    "action_count": len(actions),
+                    "package_ready": False,
+                },
+                once_key=f"{record.local_task_id}:package_submit_clicked",
+            )
+        self._client_event_wait_started = time.monotonic()
+        self._record_client_event(
+            "wait_entered",
+            properties={"foreground": self._client_event_foreground()},
+            once_key=f"{record.local_task_id}:wait_entered",
+        )
         self._refresh_account_after_worker = callable(
             getattr(self._service_transport, "account_summary", None)
         )
@@ -3141,6 +3436,27 @@ class RoleWorkbenchDialog(QDialog):
         context: _WorkbenchTaskContext,
         value: object,
     ) -> None:
+        if self._client_event_recovery_task_id == local_task_id:
+            duration_ms = max(
+                0,
+                min(
+                    int(
+                        (time.monotonic() - self._client_event_recovery_started)
+                        * 1000
+                    ),
+                    604_800_000,
+                ),
+            )
+            self._record_client_event(
+                "task_recovery_succeeded",
+                remote_task_id=self._remote_task_id(local_task_id),
+                properties={
+                    "duration_ms": duration_ms,
+                    "retry_count": self._client_event_retry_count,
+                },
+                once_key=f"{local_task_id}:task_recovery_succeeded",
+            )
+            self._client_event_recovery_task_id = ""
         if context.result_kind == "candidates":
             if not isinstance(value, CandidateResult):
                 self._on_failure("持久化任务返回了无效的身份候选")
@@ -3535,6 +3851,90 @@ class RoleWorkbenchDialog(QDialog):
             f"身份候选已准备好{suffix}。下一步：确认选中的形象，"
             "然后生成待机动作；完成后即可保存或安装。"
         )
+        duration_ms = max(
+            0,
+            min(
+                int((time.monotonic() - self._client_event_wait_started) * 1000),
+                604_800_000,
+            ),
+        )
+        remote_task_id = self._remote_task_id(self._candidate_task_id)
+        self._record_client_event(
+            "candidate_gallery_rendered",
+            remote_task_id=remote_task_id,
+            properties={
+                "operation": "identity_candidates",
+                "input_kind": request.input_mode,
+                "candidate_count": len(value.candidates),
+                "duration_ms": duration_ms,
+                "package_ready": False,
+            },
+            once_key=f"{self._candidate_task_id}:candidate_gallery_rendered",
+        )
+        QTimer.singleShot(1000, self._record_visible_candidate_exposures)
+
+    def _record_visible_candidate_exposures(self) -> None:
+        if not self._client_event_foreground() or self._candidate_result is None:
+            return
+        count = self.candidates.count()
+        if count <= 0:
+            return
+        remote_task_id = self._remote_task_id(self._candidate_task_id)
+        input_kind = (
+            self._active_request.input_mode if self._active_request is not None else "text"
+        )
+        viewport_rect = self.candidates.viewport().rect()
+        for index in range(count):
+            item = self.candidates.item(index)
+            if item is None or not self.candidates.visualItemRect(item).intersects(
+                viewport_rect
+            ):
+                continue
+            exposure_key = f"{self._candidate_task_id}:{index}"
+            with self._client_event_lock:
+                if exposure_key in self._client_event_session_exposures:
+                    continue
+            if self._record_client_event(
+                "candidate_exposed",
+                remote_task_id=remote_task_id,
+                properties={
+                    "input_kind": input_kind,
+                    "candidate_count": count,
+                    "candidate_index": index,
+                    "foreground": True,
+                },
+            ):
+                with self._client_event_lock:
+                    self._client_event_session_exposures.add(exposure_key)
+
+    def _candidate_clicked(self, item: QListWidgetItem) -> None:
+        index = self.candidates.row(item)
+        self._record_candidate_selection(index)
+
+    def _record_candidate_selection(self, index: int) -> None:
+        count = self.candidates.count()
+        if (
+            index < 0
+            or count <= 0
+            or self._active_request is None
+            or not self._candidate_task_id
+        ):
+            return
+        selection_key = f"{self._candidate_task_id}:{index}"
+        with self._client_event_lock:
+            if selection_key in self._client_event_candidate_selections:
+                return
+        if self._record_client_event(
+            "candidate_selected",
+            remote_task_id=self._remote_task_id(self._candidate_task_id),
+            properties={
+                "input_kind": self._active_request.input_mode,
+                "candidate_count": count,
+                "candidate_index": index,
+            },
+        ):
+            with self._client_event_lock:
+                self._client_event_candidate_selections.add(selection_key)
 
     def _candidate_selected(self, row: int) -> None:
         self.generate_button.setEnabled(
@@ -3928,6 +4328,28 @@ class RoleWorkbenchDialog(QDialog):
             )
         if actions:
             self._show_action_preview(actions[0])
+        duration_ms = max(
+            0,
+            min(
+                int((time.monotonic() - self._client_event_wait_started) * 1000),
+                604_800_000,
+            ),
+        )
+        operation = (
+            self._active_task_context.operation
+            if self._active_task_context is not None
+            else "initial_package"
+        )
+        self._record_client_event(
+            "preview_ready",
+            remote_task_id=self._remote_task_id(self._package_task_id),
+            properties={
+                "operation": operation,
+                "duration_ms": duration_ms,
+                "package_ready": True,
+            },
+            once_key=f"{self._package_task_id}:preview_ready",
+        )
 
     def _populate_package_actions(
         self,
@@ -4130,6 +4552,8 @@ class RoleWorkbenchDialog(QDialog):
             return
         if not self._confirm_result_use("保存并安装角色"):
             return
+        package_task_id = self._package_task_id
+        remote_task_id = self._remote_task_id(package_task_id)
         try:
             if self._package_key is None:
                 if self._editing_key is None and self._active_request is not None:
@@ -4158,7 +4582,27 @@ class RoleWorkbenchDialog(QDialog):
             f"{installed.package.display_name} v{installed.key.package_version} "
             "已安全安装；旧版本仍可在设置中回滚。"
         )
+        if remote_task_id:
+            self._last_installed_remote_task_id = remote_task_id
+            self._record_client_event(
+                "install_succeeded",
+                remote_task_id=remote_task_id,
+                properties={"package_ready": True},
+                once_key=f"{package_task_id}:install_succeeded",
+            )
         self.install_requested.emit(installed.key)
+
+    def record_role_activated(self) -> None:
+        """Record activation only after the application confirms the role switch."""
+
+        remote_task_id = self._last_installed_remote_task_id
+        if remote_task_id:
+            self._record_client_event(
+                "role_activated",
+                remote_task_id=remote_task_id,
+                properties={"package_ready": True},
+                once_key=f"{remote_task_id}:role_activated",
+            )
 
     def _confirm_result_use(self, action: str) -> bool:
         if self._settings.value(_ACK_SETTINGS_KEY, False, type=bool):
@@ -4206,6 +4650,50 @@ class RoleWorkbenchDialog(QDialog):
 
     def _on_failure(self, error: object) -> None:
         message = role_service_user_message(error)
+        error_code = self._client_error_code(error)
+        remote_task_id = self._remote_task_id(self._active_task_id)
+        self._record_client_event(
+            "client_error_shown",
+            remote_task_id=remote_task_id,
+            properties={
+                "error_code": error_code,
+                "retry_count": self._client_event_retry_count,
+            },
+        )
+        self._record_client_event(
+            "wait_interrupted",
+            remote_task_id=remote_task_id,
+            properties={
+                "foreground": self._client_event_foreground(),
+                "reason": (
+                    "network_error"
+                    if error_code in {"network_unavailable", "service_timeout"}
+                    else "service_error"
+                ),
+                "retry_count": self._client_event_retry_count,
+            },
+        )
+        if self._client_event_recovery_task_id:
+            duration_ms = max(
+                0,
+                min(
+                    int(
+                        (time.monotonic() - self._client_event_recovery_started)
+                        * 1000
+                    ),
+                    604_800_000,
+                ),
+            )
+            self._record_client_event(
+                "task_recovery_failed",
+                remote_task_id=remote_task_id,
+                properties={
+                    "duration_ms": duration_ms,
+                    "retry_count": self._client_event_retry_count,
+                    "error_code": error_code,
+                },
+            )
+            self._client_event_recovery_task_id = ""
         if self._active_task_id:
             self.resume_task_button.setEnabled(
                 self._generation_available and self._can_resume_active_task()
@@ -4242,6 +4730,25 @@ class RoleWorkbenchDialog(QDialog):
                 return
             local_task_id = self._active_task_id
             context = self._active_task_context
+            self._client_event_retry_count += 1
+            self._client_event_recovery_task_id = local_task_id
+            self._client_event_recovery_started = time.monotonic()
+            remote_task_id = self._remote_task_id(local_task_id)
+            self._record_client_event(
+                "task_recovery_started",
+                remote_task_id=remote_task_id,
+                properties={"retry_count": self._client_event_retry_count},
+            )
+            self._record_client_event(
+                "wait_resumed",
+                remote_task_id=remote_task_id,
+                properties={
+                    "foreground": self._client_event_foreground(),
+                    "duration_ms": 0,
+                    "retry_count": self._client_event_retry_count,
+                },
+            )
+            self._client_event_wait_started = time.monotonic()
             self.resume_task_button.setEnabled(False)
             self.status.setText(
                 f"正在恢复任务 {local_task_id[:8]}…；不会创建新的计费请求。"
@@ -4296,6 +4803,15 @@ class RoleWorkbenchDialog(QDialog):
         )
 
     def _on_cancelled(self) -> None:
+        self._record_client_event(
+            "wait_interrupted",
+            remote_task_id=self._remote_task_id(self._active_task_id),
+            properties={
+                "foreground": self._client_event_foreground(),
+                "reason": "user_cancelled",
+                "retry_count": self._client_event_retry_count,
+            },
+        )
         if self._active_task_id:
             try:
                 record = self._task_store.load(self._active_task_id)

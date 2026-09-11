@@ -10,6 +10,7 @@ from pathlib import Path
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QDialog, QMessageBox
 
+from moeguard import __version__
 from moeguard.app import MoeGuardApp, run
 from moeguard.cloud.role_service_binding import (
     RoleServiceBindingManager,
@@ -21,6 +22,11 @@ from moeguard.cloud.role_service_bootstrap import (
     role_service_origin_from_environment,
     role_service_origin_from_file,
     role_service_transport_from_environment,
+)
+from moeguard.cloud.role_service_client_events import (
+    ClientEventOutboxStore,
+    PreviewClientEventReporter,
+    PreviewClientEventTracker,
 )
 from moeguard.cloud.role_service_session import RoleServiceSessionStore
 from moeguard.cloud.role_workbench import (
@@ -50,6 +56,7 @@ def configure_role_workbench(
     pilot_notice_enabled: bool = False,
     pilot_notice_store: RolePilotNoticeStore | None = None,
     pilot_notice_prompt: Callable[[str], bool] | None = None,
+    client_event_tracker: PreviewClientEventTracker | None = None,
 ) -> None:
     """Inject the public workbench without embedding provider credentials."""
 
@@ -67,6 +74,7 @@ def configure_role_workbench(
         clock=clock,
     )
     refresh_account_on_next_open = False
+    event_reporter: PreviewClientEventReporter | None = None
     notice_store = pilot_notice_store or RolePilotNoticeStore(
         workspace / "pilot-notice.json"
     )
@@ -160,7 +168,7 @@ def configure_role_workbench(
         )
 
     def make_workbench():
-        nonlocal refresh_account_on_next_open
+        nonlocal event_reporter, refresh_account_on_next_open
         refresh_account = refresh_account_on_next_open
         refresh_account_on_next_open = False
         session = None
@@ -202,6 +210,21 @@ def configure_role_workbench(
                 if binding_origin is not None
                 else "此候选版尚未配置生成服务地址；本地桌宠仍可查看和管理。"
             )
+        if (
+            transport is not None
+            and pilot_notice_enabled
+            and pilot_accepted
+            and event_reporter is None
+        ):
+            tracker = client_event_tracker
+            if tracker is None:
+                tracker = PreviewClientEventTracker(
+                    ClientEventOutboxStore(workspace / "state" / "client-events.json"),
+                    app_version=__version__,
+                    enabled=notice_store.accepted,
+                    clock=clock,
+                )
+            event_reporter = PreviewClientEventReporter(tracker, transport)
         dialog = RoleWorkbenchDialog(
             RemoteRoleWorkbenchBackend(workspace),
             show_costs=False,
@@ -211,6 +234,8 @@ def configure_role_workbench(
             generation_unavailable_message=unavailable_message,
             binding_available=binding_origin is not None,
             service_unbinding_available=session is not None,
+            client_events=event_reporter if transport is not None else None,
+            client_event_entrypoint="settings",
         )
 
         if binding_origin is not None and not generation_available:
@@ -222,6 +247,7 @@ def configure_role_workbench(
 
         if session is not None:
             def remove_binding() -> None:
+                nonlocal event_reporter
                 answer = QMessageBox.warning(
                     dialog,
                     "断开角色生成服务？",
@@ -242,6 +268,7 @@ def configure_role_workbench(
                         "本机连接凭据未能完整删除。请重启萌卫检查连接状态后再试。",
                     )
                     return
+                event_reporter = None
                 dialog.accept()
                 QTimer.singleShot(0, app._on_open_custom_role_workbench)
 
@@ -253,6 +280,7 @@ def configure_role_workbench(
                 return
             success, message = app.activate_managed_role(key, role_library=library)
             if success:
+                dialog.record_role_activated()
                 QMessageBox.information(dialog, "角色已切换", message)
             else:
                 QMessageBox.critical(dialog, "角色切换失败", message)

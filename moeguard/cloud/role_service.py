@@ -14,6 +14,7 @@ import re
 import shutil
 import threading
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -700,6 +701,7 @@ class RoleServiceClient:
         artifact_store: RoleTaskArtifactStore,
         binding_store: RoleServiceBindingStore,
         request_store: RoleServiceRequestStore | None = None,
+        result_event_callback: Callable[[str, str, str], None] | None = None,
     ) -> None:
         self.transport = transport
         self.task_store = task_store
@@ -708,6 +710,19 @@ class RoleServiceClient:
         self.request_store = request_store or RoleServiceRequestStore(
             binding_store.root.parent / "service-requests"
         )
+        self.result_event_callback = result_event_callback
+
+    def _notify_result_event(
+        self, event_name: str, local_task_id: str, remote_task_id: str
+    ) -> None:
+        callback = self.result_event_callback
+        if callback is None:
+            return
+        try:
+            callback(event_name, local_task_id, remote_task_id)
+        except Exception:
+            # Product success must never depend on optional Preview telemetry.
+            return
 
     @staticmethod
     def _validate_snapshot(
@@ -811,6 +826,9 @@ class RoleServiceClient:
             raise ValueError("service returned an unsupported terminal state")
 
         def download(destination: Path) -> None:
+            self._notify_result_event(
+                "download_started", local_task_id, snapshot.remote_task_id
+            )
             received = self.transport.download_result(
                 snapshot.remote_task_id, destination
             )
@@ -820,6 +838,9 @@ class RoleServiceClient:
                     "downloaded service result disagrees with task snapshot",
                     path="service.result_sha256",
                 )
+            self._notify_result_event(
+                "download_completed", local_task_id, snapshot.remote_task_id
+            )
 
         self.artifact_store.build(local_task_id, download)
         completed, _applied = self.artifact_store.accept_completion(
@@ -835,6 +856,9 @@ class RoleServiceClient:
                 "local result tree disagrees with service result",
                 path="service.result_sha256",
             )
+        self._notify_result_event(
+            "result_verified", local_task_id, snapshot.remote_task_id
+        )
         return completed
 
     def cancel(

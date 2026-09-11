@@ -377,7 +377,7 @@ def test_preview_notice_is_required_once_before_real_service_use(
     second = _factory(app)()
 
     assert len(prompts) == 1
-    assert "最长 30 天" in prompts[0]
+    assert "内测结束后统一清理" in prompts[0]
     assert store.accepted() is True
     first.close()
     second.close()
@@ -396,16 +396,48 @@ def test_preview_notice_decline_keeps_local_management_available(
         pilot_notice_enabled=True,
         pilot_notice_store=store,
         pilot_notice_prompt=lambda _text: False,
+        session_store=_session_store(tmp_path / "session.json"),
+        clock=lambda: 1_900_000_000,
     )
 
     dialog = _factory(app)()
 
     assert dialog._service_client is None
+    assert dialog._client_events is None
     assert dialog.prepare_button.isEnabled() is False
     assert "暂不参加" in "".join(
         label.text() for label in dialog.service_bar.findChildren(QLabel)
     )
     assert store.accepted() is False
+    dialog.close()
+
+
+def test_accepted_preview_notice_enables_events_for_bound_service_only(
+    tmp_path: Path, qt_app
+) -> None:
+    class Tracker:
+        pass
+
+    app = MoeGuardApp()
+    tracker = Tracker()
+    configure_role_workbench(
+        app,
+        storage_root=tmp_path / "workbench",
+        role_library=RoleLibrary(tmp_path / "roles"),
+        service_origin="https://roles.example",
+        pilot_notice_enabled=True,
+        pilot_notice_store=RolePilotNoticeStore(tmp_path / "pilot-notice.json"),
+        pilot_notice_prompt=lambda _text: True,
+        session_store=_session_store(tmp_path / "session.json"),
+        clock=lambda: 1_900_000_000,
+        client_event_tracker=tracker,
+    )
+
+    dialog = _factory(app)()
+
+    assert dialog._service_client is not None
+    assert dialog._client_events is not None
+    assert dialog._client_events.tracker is tracker
     dialog.close()
 
 
@@ -464,10 +496,14 @@ def test_successful_explicit_binding_refreshes_units_on_reopened_workbench(
 
     assert len(reopened) == 1
     online = reopened[0]
+    # The refresh worker may already have finished inside the processEvents()
+    # loop above, in which case _worker_finished() has reset it to None.  Both
+    # orderings are correct; only the resulting label is a real assertion.
     worker = online._worker
-    assert worker is not None
-    assert worker.wait(2000)
-    qt_app.processEvents()
+    if worker is not None:
+        assert worker.wait(2000)
+    for _ in range(4):
+        qt_app.processEvents()
 
     assert online.account_summary_label is not None
     assert online.account_summary_label.text() == (

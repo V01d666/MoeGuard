@@ -27,6 +27,10 @@ from moeguard.cloud.role_service import (
     ServiceAssetRef,
     ServiceTaskSnapshot,
 )
+from moeguard.cloud.role_service_event_contract import (
+    ClientEvent,
+    serialize_client_event_batch,
+)
 
 _JSON_MEDIA_TYPE = "application/json"
 _ZIP_MEDIA_TYPE = "application/vnd.moeguard.result+zip"
@@ -52,6 +56,7 @@ __all__ = (
     "RoleServiceEnrollment",
     "RoleServicePurchaseIntent",
     "RoleServiceConnectionError",
+    "RoleServiceClientEventReceipt",
     "RoleServiceHttpError",
     "role_service_user_message",
 )
@@ -95,6 +100,13 @@ class RoleServiceAccountSummary:
 class RoleServicePurchaseIntent:
     expires_at: int
     custom_order_id: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class RoleServiceClientEventReceipt:
+    accepted_count: int
+    duplicate_count: int
+    received_at_ms: int
 
 
 class RoleServiceHttpError(RuntimeError):
@@ -493,6 +505,32 @@ class HttpRoleServiceTransport:
             raw["available_i2v_units"],
             raw["available_flexible_units"],
         )
+
+    def submit_client_events(
+        self, events: tuple[ClientEvent, ...]
+    ) -> RoleServiceClientEventReceipt:
+        body = serialize_client_event_batch(events)
+        payload, _headers = self._request(
+            "POST",
+            "/v1/client-events",
+            body=body,
+            headers={"Content-Type": _JSON_MEDIA_TYPE},
+        )
+        raw = self._data(payload)
+        expected_fields = {"accepted_count", "duplicate_count", "received_at_ms"}
+        if not isinstance(raw, dict) or set(raw) != expected_fields:
+            raise ValueError("role service client event response is invalid")
+        accepted = raw["accepted_count"]
+        duplicates = raw["duplicate_count"]
+        received_at_ms = raw["received_at_ms"]
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in (accepted, duplicates, received_at_ms)
+        ):
+            raise ValueError("role service client event receipt is invalid")
+        if accepted + duplicates != len(events) or received_at_ms <= 0:
+            raise ValueError("role service client event receipt does not match batch")
+        return RoleServiceClientEventReceipt(accepted, duplicates, received_at_ms)
 
     def create_purchase_intent(self) -> RoleServicePurchaseIntent:
         payload, _headers = self._request(

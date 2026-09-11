@@ -19,6 +19,7 @@ from moeguard.cloud.role_service_bootstrap import (
     role_service_origin_from_file,
     role_service_transport_from_environment,
 )
+from moeguard.cloud.role_service_event_contract import ClientEvent
 from moeguard.cloud.role_service_http_client import (
     HttpRoleServiceTransport,
     RoleServiceConnectionError,
@@ -198,6 +199,81 @@ def test_public_role_service_client_uses_explicit_cloudflare_safe_user_agent(
 
     assert captured is not None
     assert captured.get_header("User-agent") == "MoeGuard-Role-Service-Client/0.2"
+
+
+def test_public_client_submits_strict_content_free_event_batch(monkeypatch) -> None:
+    captured = None
+
+    def respond(request, *, timeout: float):
+        nonlocal captured
+        captured = request
+        assert timeout == 30.0
+        return _JsonResponse(
+            {"accepted_count": 1, "duplicate_count": 0, "received_at_ms": 1234}
+        )
+
+    event = ClientEvent.from_dict(
+        {
+            "event_id": "10000000-0000-4000-8000-000000000001",
+            "event_name": "workbench_opened",
+            "client_at_ms": 1000,
+            "sequence": 0,
+            "session_id": "20000000-0000-4000-8000-000000000002",
+            "journey_id": "30000000-0000-4000-8000-000000000003",
+            "app_version": "0.2.0-preview.2",
+            "properties": {"screen": "pet_workshop", "entrypoint": "settings"},
+        }
+    )
+    monkeypatch.setattr(http_client, "_urlopen_no_redirect", respond)
+
+    receipt = HttpRoleServiceTransport(
+        "https://roles.example", _token()
+    ).submit_client_events((event,))
+
+    assert receipt.accepted_count == 1
+    assert receipt.duplicate_count == 0
+    assert receipt.received_at_ms == 1234
+    assert captured is not None
+    assert captured.full_url == "https://roles.example/v1/client-events"
+    assert captured.get_header("Content-type") == "application/json"
+    body = json.loads(captured.data)
+    assert body == {"schema_version": 1, "events": [event.to_dict()]}
+    assert "account_id" not in captured.data.decode()
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"accepted_count": 1, "duplicate_count": 0},
+        {"accepted_count": 2, "duplicate_count": 0, "received_at_ms": 1234},
+        {"accepted_count": True, "duplicate_count": 0, "received_at_ms": 1234},
+        {"accepted_count": 1, "duplicate_count": 0, "received_at_ms": 0},
+    ],
+)
+def test_public_client_rejects_invalid_event_receipts(monkeypatch, response: dict) -> None:
+    event = ClientEvent.from_dict(
+        {
+            "event_id": "10000000-0000-4000-8000-000000000001",
+            "event_name": "workbench_opened",
+            "client_at_ms": 1000,
+            "sequence": 0,
+            "session_id": "20000000-0000-4000-8000-000000000002",
+            "journey_id": "30000000-0000-4000-8000-000000000003",
+            "app_version": "0.2.0-preview.2",
+            "properties": {"screen": "pet_workshop", "entrypoint": "settings"},
+        }
+    )
+
+    monkeypatch.setattr(
+        http_client,
+        "_urlopen_no_redirect",
+        lambda _request, *, timeout: _JsonResponse(response),
+    )
+
+    with pytest.raises(ValueError, match="client event"):
+        HttpRoleServiceTransport(
+            "https://roles.example", _token()
+        ).submit_client_events((event,))
 
 
 @pytest.mark.parametrize(
