@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moeguard"
-version = "0.2.0-preview.2"
+version = "0.2.0-preview.3"
 description = "萌卫 MoeGuard — 二次元虚拟桌宠 × 智能安防"
 readme = "README.md"
 license = { text = "Apache-2.0" }

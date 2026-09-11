@@ -49,7 +49,7 @@
 
 ## 项目时间线
 
-- [2026/09/01] 🧪 [v0.2.0 Preview](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0-preview) 已完成桌宠工坊、远端生成次数、任务恢复和角色后续编辑的首轮实机验收，即将通过限量免费兑换码开放试运行。
+- [2026/09/01] 🧪 [v0.2.0 Preview](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0-preview) 已完成桌宠工坊、远端生成次数、任务恢复和角色后续编辑的首轮实机验收，并已通过[爱发电内测公告](https://ifdian.net/p/d2c072d4a61d11f1bd1c5254001e7c00)开放限量免费兑换码试运行。
 - [2026/08/23] 🎬 桌宠工坊的首支实机 Demo 完成。你可以观看[文字生成桌宠](.github/assets/text2pet-demo.mp4)与[图片生成桌宠](.github/assets/image2pet-demo.mp4)的完整流程。
 - [2026/08/18] 🚀 [MoeGuard v0.1.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.1.0) 正式发布，带来三位初始角色、完整桌面互动、手动值守和经单独授权的 Windows 锁屏值守。
 

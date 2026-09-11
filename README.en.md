@@ -49,7 +49,7 @@ The project is still an **experimental pre-alpha**. It may help keep an eye on t
 
 ## Release
 
-- [2026/09/01] 🧪 [v0.2.0 Preview](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0-preview) has completed its first hands-on validation of Pet Workshop, remote generation allowances, task recovery, and post-install editing. A small free redemption-code trial is being prepared.
+- [2026/09/01] 🧪 [v0.2.0 Preview](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0-preview) has completed its first hands-on validation of Pet Workshop, remote generation allowances, task recovery, and post-install editing. A limited free redemption-code trial is now open through the [Afdian Preview post](https://ifdian.net/p/d2c072d4a61d11f1bd1c5254001e7c00).
 - [2026/08/23] 🎬 The first working Pet Workshop demos were completed. Watch the full [text-to-pet](.github/assets/text2pet-demo.mp4) and [image-to-pet](.github/assets/image2pet-demo.mp4) workflows.
 - [2026/08/18] 🚀 [MoeGuard v0.1.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.1.0) is out with three starter characters, complete desktop interactions, manual guarding, and separately authorized Windows lock-screen guarding.
 
