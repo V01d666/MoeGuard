@@ -9,8 +9,7 @@ from pathlib import Path
 
 PILOT_NOTICE_VERSION = "2026-09-v0.2-preview.2"
 PILOT_NOTICE_TEXT = (
-    "内测提示：为改进桌宠生成效果，我们会保存你提交的文字、参考图片、"
-    "生成结果和必要的使用记录，并在内测结束后统一清理。"
+    "内测期间会保留桌宠工坊的提示词、参考图片与生成结果，用于改进生成体验。"
 )
 
 

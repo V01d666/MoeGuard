@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 
 from moeguard.config import AppConfig
 from moeguard.pet.role_assets import discover_bundled_roles
+from moeguard.role_pilot import PILOT_NOTICE_TEXT
 from moeguard.roles import PackageKey, RoleContractError, RoleLibrary
 from moeguard.ui import theme
 
@@ -295,17 +296,7 @@ class SettingsDialog(QDialog):
                 "打开桌宠工坊；当前设置中尚未保存的修改会被取消。"
             )
             self.custom_role_button.clicked.connect(self._open_custom_role_workbench)
-            self.role_pilot_notice_button = QPushButton("内测数据说明…")
-            self.role_pilot_notice_button.setToolTip(
-                "查看桌宠工坊内测期间的数据暂存范围和期限"
-            )
-            self.role_pilot_notice_button.clicked.connect(
-                self._show_role_pilot_notice
-            )
-            self.role_pilot_notice_button.setStyleSheet(theme.button_qss("normal"))
-            role_action_buttons.extend(
-                (self.custom_role_button, self.role_pilot_notice_button)
-            )
+            role_action_buttons.append(self.custom_role_button)
         self.remove_role_button = QPushButton("删除所选版本")
         self.remove_role_button.setStyleSheet(theme.button_qss("normal"))
         self.remove_role_button.clicked.connect(self._remove_selected_role)
@@ -323,6 +314,10 @@ class SettingsDialog(QDialog):
             )
             self.role_credit_button.clicked.connect(self._open_role_credit_dialog)
             role_form.addRow("生成服务", self.role_credit_button)
+        if self._custom_role_workbench_available:
+            self.role_pilot_notice_label = QLabel(PILOT_NOTICE_TEXT)
+            self.role_pilot_notice_label.setProperty("role", "hint")
+            role_form.addRow("内测说明", self.role_pilot_notice_label)
         self.role_selector.currentIndexChanged.connect(
             self._update_role_management_state
         )
@@ -387,15 +382,6 @@ class SettingsDialog(QDialog):
         """Close the stale settings snapshot before opening the role editor."""
         self.reject()
         self.custom_role_workbench_requested.emit()
-
-    def _show_role_pilot_notice(self) -> None:
-        from moeguard.role_pilot import PILOT_NOTICE_TEXT
-
-        QMessageBox.information(
-            self,
-            "桌宠工坊内测数据说明",
-            PILOT_NOTICE_TEXT,
-        )
 
     def _open_role_credit_dialog(self) -> None:
         """Close the stale settings snapshot before managing online credits."""

@@ -491,7 +491,6 @@ def test_settings_replaces_a_missing_managed_role_with_lumen() -> None:
     row = (
         dialog.import_role_button,
         dialog.custom_role_button,
-        dialog.role_pilot_notice_button,
         dialog.remove_role_button,
     )
     assert len({button.height() for button in row}) == 1
@@ -499,6 +498,7 @@ def test_settings_replaces_a_missing_managed_role_with_lumen() -> None:
         button.width() for button in row
     ) <= 1
     assert dialog.role_credit_button.height() == row[0].height()
+    assert "提示词、参考图片与生成结果" in dialog.role_pilot_notice_label.text()
     dialog.close()
 
 

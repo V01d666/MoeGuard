@@ -171,6 +171,38 @@ def _account_summary_text(value: RoleServiceAccountSummary) -> str:
     )
 
 
+def _support_id_row(
+    account_id: str,
+    parent: QWidget,
+) -> tuple[QWidget, QLineEdit, QPushButton]:
+    """Build a compact, copyable support identifier without exposing credentials."""
+
+    row = QWidget(parent)
+    layout = QHBoxLayout(row)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(8)
+
+    label = QLabel("支持编号")
+    label.setToolTip("反馈桌宠工坊问题时，请提供这个匿名编号。")
+    value = QLineEdit(account_id)
+    value.setReadOnly(True)
+    value.setAccessibleName("支持编号")
+    value.setToolTip("这是匿名账号的完整支持编号，不包含生成服务凭据。")
+    copy_button = QPushButton("复制编号")
+    copy_button.setAccessibleName("复制支持编号")
+    copy_button.setToolTip("复制完整支持编号，反馈问题时可直接粘贴。")
+
+    def copy_account_id() -> None:
+        QApplication.clipboard().setText(account_id)
+        copy_button.setText("已复制")
+
+    copy_button.clicked.connect(copy_account_id)
+    layout.addWidget(label)
+    layout.addWidget(value, 1)
+    layout.addWidget(copy_button)
+    return row, value, copy_button
+
+
 def _client_runtime_info() -> ClientRuntimeInfo:
     machine = platform.machine().strip().lower()
     architecture = {
@@ -1059,9 +1091,11 @@ class RoleCreditDialog(QDialog):
         parent: QWidget | None = None,
         *,
         unavailable_message: str = "",
+        account_id: str = "",
     ) -> None:
         super().__init__(parent)
         self._service_transport = service_transport
+        self._account_id = account_id.strip()
         self._worker: _BackendWorker | None = None
         self.redeemed_successfully = False
 
@@ -1086,6 +1120,17 @@ class RoleCreditDialog(QDialog):
         hint.setWordWrap(True)
         hint.setProperty("role", "hint")
         root.addWidget(hint)
+
+        self.support_id_row: QWidget | None = None
+        self.support_id_edit: QLineEdit | None = None
+        self.copy_support_id_button: QPushButton | None = None
+        if self._account_id:
+            (
+                self.support_id_row,
+                self.support_id_edit,
+                self.copy_support_id_button,
+            ) = _support_id_row(self._account_id, self)
+            root.addWidget(self.support_id_row)
 
         balance_row = QHBoxLayout()
         self.balance_label = QLabel(
@@ -1238,9 +1283,11 @@ class RoleWorkbenchDialog(QDialog):
         service_unbinding_available: bool = False,
         client_events: ClientEventReporter | None = None,
         client_event_entrypoint: str = "settings",
+        account_id: str = "",
     ) -> None:
         super().__init__(parent)
         self._backend = backend
+        self._account_id = account_id.strip()
         # Capture Qt display information on the UI thread.  Persistent task
         # preparation runs in a worker and must never query QApplication.
         self._client_runtime = _client_runtime_info()
@@ -1381,6 +1428,17 @@ class RoleWorkbenchDialog(QDialog):
                 self.bind_service_button.clicked.connect(self.binding_requested.emit)
                 service_layout.addWidget(self.bind_service_button)
             root.addWidget(self.service_bar)
+
+        self.support_id_row: QWidget | None = None
+        self.support_id_edit: QLineEdit | None = None
+        self.copy_support_id_button: QPushButton | None = None
+        if self._account_id:
+            (
+                self.support_id_row,
+                self.support_id_edit,
+                self.copy_support_id_button,
+            ) = _support_id_row(self._account_id, self)
+            root.addWidget(self.support_id_row)
 
         self.account_bar: QWidget | None = None
         self.account_summary_label: QLabel | None = None
@@ -3759,7 +3817,11 @@ class RoleWorkbenchDialog(QDialog):
     def _open_credit_dialog(self) -> None:
         if self._service_transport is None or self._worker is not None:
             return
-        dialog = RoleCreditDialog(self._service_transport, self)
+        dialog = RoleCreditDialog(
+            self._service_transport,
+            self,
+            account_id=self._account_id,
+        )
         dialog.exec()
         if dialog.redeemed_successfully:
             self.status.setText("兑换成功；生成次数已经到账。")

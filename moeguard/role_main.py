@@ -34,10 +34,6 @@ from moeguard.cloud.role_workbench import (
     RoleCreditDialog,
     RoleWorkbenchDialog,
 )
-from moeguard.role_pilot import (
-    PILOT_NOTICE_TEXT,
-    RolePilotNoticeStore,
-)
 from moeguard.roles import PackageKey, RoleLibrary
 from moeguard.utils.paths import ROLE_WORKBENCH_DIR, resource_path
 
@@ -54,8 +50,6 @@ def configure_role_workbench(
     service_config_path: Path | None = None,
     clock: Callable[[], float] = time.time,
     pilot_notice_enabled: bool = False,
-    pilot_notice_store: RolePilotNoticeStore | None = None,
-    pilot_notice_prompt: Callable[[str], bool] | None = None,
     client_event_tracker: PreviewClientEventTracker | None = None,
 ) -> None:
     """Inject the public workbench without embedding provider credentials."""
@@ -75,30 +69,6 @@ def configure_role_workbench(
     )
     refresh_account_on_next_open = False
     event_reporter: PreviewClientEventReporter | None = None
-    notice_store = pilot_notice_store or RolePilotNoticeStore(
-        workspace / "pilot-notice.json"
-    )
-
-    def confirm_pilot_notice() -> bool:
-        if not pilot_notice_enabled or notice_store.accepted():
-            return True
-        if pilot_notice_prompt is not None:
-            accepted = bool(pilot_notice_prompt(PILOT_NOTICE_TEXT))
-        else:
-            notice = QMessageBox()
-            notice.setIcon(QMessageBox.Information)
-            notice.setWindowTitle("桌宠工坊内测说明 · 萌卫")
-            notice.setText(PILOT_NOTICE_TEXT)
-            accept_button = notice.addButton(
-                "参加内测并继续", QMessageBox.AcceptRole
-            )
-            notice.addButton("暂不使用", QMessageBox.RejectRole)
-            notice.setDefaultButton(accept_button)
-            notice.exec()
-            accepted = notice.clickedButton() is accept_button
-        if accepted:
-            notice_store.accept()
-        return accepted
     try:
         if service_origin is not None:
             configured_origin = https_role_service_origin(service_origin)
@@ -132,11 +102,13 @@ def configure_role_workbench(
 
     def make_credit_dialog() -> QDialog:
         remembered_origin = None
+        account_id = ""
         unavailable_message = ""
         try:
             stored = sessions.load()
             if stored is not None:
                 remembered_origin = stored.service_origin
+                account_id = stored.account_id
             session = binding.current_session()
             transport = (
                 session.transport()
@@ -151,7 +123,7 @@ def configure_role_workbench(
             )
 
         if transport is not None:
-            return RoleCreditDialog(transport)
+            return RoleCreditDialog(transport, account_id=account_id)
 
         binding_origin = configured_origin or remembered_origin
         if binding_origin is not None:
@@ -172,12 +144,14 @@ def configure_role_workbench(
         refresh_account = refresh_account_on_next_open
         refresh_account_on_next_open = False
         session = None
+        account_id = ""
         remembered_origin = None
         unavailable_message = ""
         try:
             session = sessions.load()
             if session is not None:
                 remembered_origin = session.service_origin
+                account_id = session.account_id
             if session is not None and session.expires_at <= int(clock()):
                 unavailable_message = (
                     "生成服务连接已过期；本地桌宠仍可查看和管理。"
@@ -196,13 +170,6 @@ def configure_role_workbench(
                 "重新连接后可继续生成。"
             )
         binding_origin = configured_origin or remembered_origin
-        pilot_accepted = binding_origin is None or confirm_pilot_notice()
-        if not pilot_accepted:
-            transport = None
-            binding_origin = None
-            unavailable_message = (
-                "你已选择暂不参加本轮桌宠工坊内测；本地桌宠仍可查看和管理。"
-            )
         generation_available = transport is not None
         if not generation_available and not unavailable_message:
             unavailable_message = (
@@ -213,7 +180,6 @@ def configure_role_workbench(
         if (
             transport is not None
             and pilot_notice_enabled
-            and pilot_accepted
             and event_reporter is None
         ):
             tracker = client_event_tracker
@@ -221,7 +187,7 @@ def configure_role_workbench(
                 tracker = PreviewClientEventTracker(
                     ClientEventOutboxStore(workspace / "state" / "client-events.json"),
                     app_version=__version__,
-                    enabled=notice_store.accepted,
+                    enabled=lambda: pilot_notice_enabled,
                     clock=clock,
                 )
             event_reporter = PreviewClientEventReporter(tracker, transport)
@@ -236,6 +202,7 @@ def configure_role_workbench(
             service_unbinding_available=session is not None,
             client_events=event_reporter if transport is not None else None,
             client_event_entrypoint="settings",
+            account_id=account_id,
         )
 
         if binding_origin is not None and not generation_available:
