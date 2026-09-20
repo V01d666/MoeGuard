@@ -60,6 +60,7 @@ from moeguard.cloud.role_service import (
     RoleServiceClient,
     RoleServiceRequest,
     RoleServiceRequestStore,
+    RoleServiceTaskFailure,
     RoleServiceTransport,
 )
 from moeguard.cloud.role_service_http_client import (
@@ -143,7 +144,24 @@ _WORKBENCH_ACTIONS = tuple(
 )
 _TEXT_DETAIL_LIMIT = 480
 _ACK_SETTINGS_KEY = "role_workbench/skip_result_confirmation"
-_SERVICE_POLL_SECONDS = 1.0
+# Remote polling cadence. The first seconds stay responsive so the UI can show
+# "queued -> running" quickly; afterwards the interval widens because a running
+# generation takes minutes, and one request per second would otherwise spend the
+# account's server-side rate budget and multiply the exposure to transient
+# cross-border network failures.
+_SERVICE_POLL_SCHEDULE = ((15.0, 1.0), (90.0, 3.0))
+_SERVICE_POLL_MAX_SECONDS = 5.0
+# Error codes that mean "the link failed", not "the task failed". The service
+# task keeps running, so these are reported as an interruption to resume.
+_NETWORK_ERROR_CODES = frozenset(
+    {"service_timeout", "network_unavailable", "service_unavailable"}
+)
+# A single failed poll must never abandon a task that the service is still
+# working on: the request is a read-only status query, the submission is
+# idempotent, and the work continues on the server regardless. Only a sustained
+# outage is reported to the user.
+_SERVICE_POLL_MAX_CONSECUTIVE_FAILURES = 6
+_SERVICE_POLL_RETRY_BACKOFF_SECONDS = (1.0, 2.0, 4.0, 8.0)
 _EDITABLE_ROLE_STATUS_ROLE = Qt.UserRole + 1
 _EDITABLE_ROLE_REASON_ROLE = Qt.UserRole + 2
 _INVALID_PACKAGE_NAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -151,6 +169,39 @@ _DIRECTIONAL_OPPOSITES = {
     "peek_left": "peek_right",
     "peek_right": "peek_left",
 }
+
+
+def _is_transient_poll_error(error: BaseException) -> bool:
+    """Whether a failed status query should be retried instead of surfaced.
+
+    Polling is a read-only query against an already idempotent submission, so
+    the service keeps working regardless of the answer being lost. Transport
+    faults, rate limiting and server-side unavailability are therefore retried;
+    authentication, quota and contract errors are real answers and must stop
+    the wait so the user can act on them.
+    """
+
+    if isinstance(error, RoleServiceConnectionError):
+        return True
+    if isinstance(error, RoleServiceHttpError):
+        return error.status == 429 or error.status >= 500
+    return False
+
+
+def _service_poll_interval(waited_seconds: float) -> float:
+    """Widen the polling interval as a task keeps running.
+
+    Generations take minutes, so a fixed one-second cadence would issue
+    hundreds of requests per task. That spends the account's server-side rate
+    budget and, on a lossy cross-border link, makes an interrupted request
+    nearly certain. Early polls stay frequent so the UI reflects the queued to
+    running transition promptly.
+    """
+
+    for threshold, interval in _SERVICE_POLL_SCHEDULE:
+        if waited_seconds < threshold:
+            return interval
+    return _SERVICE_POLL_MAX_SECONDS
 
 
 def _account_summary_text(value: RoleServiceAccountSummary) -> str:
@@ -1288,6 +1339,11 @@ class RoleWorkbenchDialog(QDialog):
         super().__init__(parent)
         self._backend = backend
         self._account_id = account_id.strip()
+        # Waiting for a remote task sleeps between polls. Tests replace this
+        # seam so they can exercise the retry cadence without real delays;
+        # patching the shared time module instead would freeze the Qt helpers
+        # that the same tests rely on.
+        self._poll_sleep: Callable[[float], None] = time.sleep
         # Capture Qt display information on the UI thread.  Persistent task
         # preparation runs in a worker and must never query QApplication.
         self._client_runtime = _client_runtime_info()
@@ -2191,6 +2247,13 @@ class RoleWorkbenchDialog(QDialog):
 
     @staticmethod
     def _client_error_code(error: object) -> str:
+        if isinstance(error, RoleServiceTaskFailure):
+            if error.error_code in {
+                "provider_content_rejected",
+                "provider_technical_failure",
+            }:
+                return error.error_code
+            return "task_failed"
         if isinstance(error, RoleServiceConnectionError):
             return (
                 "service_timeout"
@@ -3414,22 +3477,52 @@ class RoleWorkbenchDialog(QDialog):
                 progress,
             )
 
+        waited = 0.0
+        consecutive_failures = 0
+        sleep = self._poll_sleep
         while True:
-            record = self._service_client.poll(local_task_id)
+            try:
+                record = self._service_client.poll(local_task_id)
+            except (RoleServiceConnectionError, RoleServiceHttpError) as error:
+                # The service task is unaffected by a failed status query, so a
+                # transient network fault must not surface as a task failure.
+                if not _is_transient_poll_error(error):
+                    raise
+                consecutive_failures += 1
+                if consecutive_failures >= _SERVICE_POLL_MAX_CONSECUTIVE_FAILURES:
+                    raise
+                delay = _SERVICE_POLL_RETRY_BACKOFF_SECONDS[
+                    min(
+                        consecutive_failures - 1,
+                        len(_SERVICE_POLL_RETRY_BACKOFF_SECONDS) - 1,
+                    )
+                ]
+                progress(
+                    f"网络不稳定，正在重试查询远端任务 {local_task_id[:8]}…；"
+                    "任务仍在云端继续，不会重复提交",
+                    self._task_store.load(local_task_id).progress,
+                )
+                sleep(delay)
+                waited += delay
+                continue
+            consecutive_failures = 0
             if record.status == "succeeded":
                 artifact_root = self._task_artifacts.result(local_task_id)
                 return self._read_task_result(artifact_root, context)
             if record.status == "cancelled":
                 raise _BackendCancelled
             if record.status == "failed":
-                raise RuntimeError(
-                    f"远端任务未完成：{record.error_code or 'service_task_failed'}"
+                raise RoleServiceTaskFailure(
+                    record.error_code or "service_task_failed",
+                    retryable=record.retryable,
                 )
             progress(
                 f"正在查询远端任务 {local_task_id[:8]}…；不会重复提交",
                 record.progress,
             )
-            time.sleep(_SERVICE_POLL_SECONDS)
+            delay = _service_poll_interval(waited)
+            sleep(delay)
+            waited += delay
 
     def _start_persistent_task(
         self, spec: RoleTaskSpec, context: _WorkbenchTaskContext
@@ -3565,16 +3658,18 @@ class RoleWorkbenchDialog(QDialog):
             return False
         if self._service_client is not None:
             try:
+                record = self._task_store.load(self._active_task_id)
+                self._task_contexts.load(self._active_task_id)
+                if record.status == "failed":
+                    return record.retryable
+                if record.status in {"cancel_requested", "cancelled", "succeeded"}:
+                    return False
                 if bool(
                     self._service_client.binding_store.load(self._active_task_id)
                     or self._service_client.request_store.load(self._active_task_id)
                 ):
                     return True
-                record = self._task_store.load(self._active_task_id)
-                self._task_contexts.load(self._active_task_id)
-                return record.status in {"queued", "running"} or (
-                    record.status == "failed" and record.retryable
-                )
+                return record.status in {"queued", "running"}
             except (RoleContractError, ValueError):
                 return False
         if self._backend.is_fake:
@@ -3909,8 +4004,12 @@ class RoleWorkbenchDialog(QDialog):
             else ""
         )
         self._update_generation_selection()
+        if request.input_mode == "image":
+            ready_text = "参考图片处理完成"
+        else:
+            ready_text = "身份候选已生成"
         self.status.setText(
-            f"身份候选已准备好{suffix}。下一步：确认选中的形象，"
+            f"{ready_text}{suffix}。下一步：确认选中的形象，"
             "然后生成待机动作；完成后即可保存或安装。"
         )
         duration_ms = max(
@@ -4710,6 +4809,29 @@ class RoleWorkbenchDialog(QDialog):
         face = random.choice(choices or self._activity_faces)
         self.activity_indicator.setText(f"{face}  正在认真制作中…")
 
+    def _clear_terminal_task_context(self) -> None:
+        if self._active_task_id:
+            self._task_contexts.clear_active(self._active_task_id)
+        self._active_task_id = ""
+        self._active_task_context = None
+        self._retry_operation = None
+        self._retry_success = None
+        self.resume_task_button.setEnabled(False)
+
+    def _show_content_rejected_dialog(self, message: str) -> None:
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("参考图未通过自动内容检查")
+        box.setText(message)
+        change_button = box.addButton("更换参考图", QMessageBox.AcceptRole)
+        box.addButton("返回", QMessageBox.RejectRole)
+        box.setDefaultButton(change_button)
+        box.exec()
+        if box.clickedButton() is change_button:
+            self._set_ui_stage(1)
+            self.input_tabs.setCurrentIndex(1)
+            self._choose_image()
+
     def _on_failure(self, error: object) -> None:
         message = role_service_user_message(error)
         error_code = self._client_error_code(error)
@@ -4756,6 +4878,14 @@ class RoleWorkbenchDialog(QDialog):
                 },
             )
             self._client_event_recovery_task_id = ""
+        if (
+            isinstance(error, RoleServiceTaskFailure)
+            and error.error_code == "provider_content_rejected"
+        ):
+            self._clear_terminal_task_context()
+            self.status.setText(message)
+            self._show_content_rejected_dialog(message)
+            return
         if self._active_task_id:
             self.resume_task_button.setEnabled(
                 self._generation_available and self._can_resume_active_task()
@@ -4769,6 +4899,19 @@ class RoleWorkbenchDialog(QDialog):
             self._retry_success = self._current_success
             self.resume_task_button.setEnabled(self._generation_available)
         self.status.setText(f"任务未完成：{message}")
+        if self._client_error_code(error) in _NETWORK_ERROR_CODES:
+            # The wait ended, but the service task is unaffected by a lost
+            # connection and is very likely still running. Saying "failed"
+            # here is what drove users to retry repeatedly against a task
+            # that was already producing a result.
+            QMessageBox.warning(
+                self,
+                "网络中断，任务仍在云端继续",
+                f"{message}\n\n"
+                "与云端的连接中断了，但任务没有取消，也不会重复计费。\n"
+                "请稍候点击“恢复失败任务”继续等待同一个任务，不要重新生成。",
+            )
+            return
         QMessageBox.critical(
             self,
             "桌宠工坊任务未完成",

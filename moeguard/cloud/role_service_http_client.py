@@ -12,18 +12,21 @@ import io
 import json
 import re
 import shutil
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, TypeVar
 
 from moeguard.cloud.role_service import (
     RoleServiceRequest,
+    RoleServiceTaskFailure,
     ServiceAssetRef,
     ServiceTaskSnapshot,
 )
@@ -41,6 +44,13 @@ _MAX_JSON_RESPONSE_BYTES = 1024 * 1024
 _MAX_RESULT_RESPONSE_BYTES = 128 * 1024 * 1024
 _MAX_ERROR_RESPONSE_BYTES = 64 * 1024
 _DEFAULT_TRANSFER_TIMEOUT_SECONDS = 180.0
+# Multi-megabyte transfers are the most fragile part of a cross-border link:
+# a single interrupted upload used to fail the whole role generation. Both
+# transfers are safe to repeat -- uploads are deduplicated by content hash on
+# the service and results are read-only -- so a lost connection is retried.
+_TRANSFER_MAX_ATTEMPTS = 3
+_TRANSFER_RETRY_BACKOFF_SECONDS = (2.0, 5.0)
+_T = TypeVar("_T")
 _WINDOWS_RESERVED = {
     "con",
     "prn",
@@ -163,6 +173,22 @@ def _read_bounded(response: Any, limit: int) -> bytes:
 def role_service_user_message(error: object) -> str:
     """Return stable Chinese UX copy without echoing transport internals."""
 
+    if isinstance(error, RoleServiceTaskFailure):
+        if error.error_code == "provider_content_rejected":
+            return (
+                "生成服务未接受这张参考图，本次没有扣除生成次数。"
+                "请更换一张参考图后再试。即使图片本身合规，也可能被自动审核误判。"
+            )
+        if error.error_code == "provider_technical_failure":
+            return (
+                "生成服务暂时未能完成本次任务，本次没有扣除生成次数。"
+                "请稍后恢复同一任务。"
+            )
+        return (
+            "生成服务未能完成本次任务，本次没有扣除生成次数。"
+            if not error.retryable
+            else "生成服务暂时未能完成本次任务，请稍后恢复同一任务。"
+        )
     if isinstance(error, RoleServiceConnectionError):
         if error.code == "service_timeout":
             return "角色生成服务响应超时。请稍后恢复同一任务，不要重新提交。"
@@ -323,6 +349,31 @@ class HttpRoleServiceTransport:
             raise ValueError("role service timeouts must be positive")
         self.timeout = float(timeout)
         self.transfer_timeout = float(transfer_timeout)
+        # Tests replace this seam; patching the shared time module would also
+        # freeze unrelated helpers.
+        self._transfer_sleep = time.sleep
+
+    def _retry_transfer(self, operation: Callable[[], _T]) -> _T:
+        """Run a large, repeatable transfer, retrying transport faults.
+
+        Only connection-level faults are retried. An HTTP status is a real
+        answer from the service -- retrying an authentication, quota or
+        payload rejection would just repeat a failure the user must act on.
+        """
+
+        last_error: RoleServiceConnectionError | None = None
+        for attempt in range(_TRANSFER_MAX_ATTEMPTS):
+            try:
+                return operation()
+            except RoleServiceConnectionError as error:
+                last_error = error
+                if attempt == _TRANSFER_MAX_ATTEMPTS - 1:
+                    break
+                self._transfer_sleep(_TRANSFER_RETRY_BACKOFF_SECONDS[attempt])
+        assert last_error is not None
+        # Re-raise the sanitized code rather than a new message: the error text
+        # is deliberately free of host, token and OS details.
+        raise last_error
 
     def _request(
         self,
@@ -434,18 +485,23 @@ class HttpRoleServiceTransport:
         media_type: str,
         expires_at: int,
     ) -> ServiceAssetRef:
-        payload, _headers = self._request(
-            "POST",
-            "/v1/assets",
-            body=Path(source).read_bytes(),
-            headers={
-                "Content-Type": media_type,
-                "X-MoeGuard-Purpose": purpose,
-                "X-MoeGuard-Expires-At": str(expires_at),
-            },
-            timeout=self.transfer_timeout,
-        )
-        return ServiceAssetRef.from_dict(self._data(payload))
+        body = Path(source).read_bytes()
+
+        def attempt() -> ServiceAssetRef:
+            payload, _headers = self._request(
+                "POST",
+                "/v1/assets",
+                body=body,
+                headers={
+                    "Content-Type": media_type,
+                    "X-MoeGuard-Purpose": purpose,
+                    "X-MoeGuard-Expires-At": str(expires_at),
+                },
+                timeout=self.transfer_timeout,
+            )
+            return ServiceAssetRef.from_dict(self._data(payload))
+
+        return self._retry_transfer(attempt)
 
     def account_summary(self) -> RoleServiceAccountSummary:
         payload, _headers = self._request("GET", "/v1/account")
@@ -582,17 +638,21 @@ class HttpRoleServiceTransport:
 
     def download_result(self, remote_task_id: str, destination: Path) -> str:
         quoted = urllib.parse.quote(remote_task_id, safe="")
-        payload, headers = self._request(
-            "GET",
-            f"/v1/tasks/{quoted}/result",
-            max_response_bytes=_MAX_RESULT_RESPONSE_BYTES,
-            timeout=self.transfer_timeout,
-        )
-        if headers.get_content_type() != _ZIP_MEDIA_TYPE:
-            raise ValueError("role service result media type is invalid")
-        expected = headers.get("X-MoeGuard-Tree-SHA256", "")
-        digest = _extract_result_archive(payload, Path(destination))
-        if digest != expected:
-            shutil.rmtree(destination, ignore_errors=True)
-            raise ValueError("role service result archive hash changed in transit")
-        return digest
+
+        def attempt() -> str:
+            payload, headers = self._request(
+                "GET",
+                f"/v1/tasks/{quoted}/result",
+                max_response_bytes=_MAX_RESULT_RESPONSE_BYTES,
+                timeout=self.transfer_timeout,
+            )
+            if headers.get_content_type() != _ZIP_MEDIA_TYPE:
+                raise ValueError("role service result media type is invalid")
+            expected = headers.get("X-MoeGuard-Tree-SHA256", "")
+            digest = _extract_result_archive(payload, Path(destination))
+            if digest != expected:
+                shutil.rmtree(destination, ignore_errors=True)
+                raise ValueError("role service result archive hash changed in transit")
+            return digest
+
+        return self._retry_transfer(attempt)

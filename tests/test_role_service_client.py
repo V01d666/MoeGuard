@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 import moeguard.cloud.role_service_http_client as http_client
-from moeguard.cloud.role_service import validate_role_service_image
+from moeguard.cloud.role_service import RoleServiceTaskFailure, validate_role_service_image
 from moeguard.cloud.role_service_bootstrap import (
     role_service_origin_from_environment,
     role_service_origin_from_file,
@@ -319,12 +319,26 @@ def test_public_client_rejects_invalid_event_receipts(monkeypatch, response: dic
             RoleServiceConnectionError("service_timeout"),
             "响应超时",
         ),
+        (
+            RoleServiceTaskFailure(
+                "provider_content_rejected", retryable=False
+            ),
+            "即使图片本身合规，也可能被自动审核误判",
+        ),
+        (
+            RoleServiceTaskFailure(
+                "provider_technical_failure", retryable=True
+            ),
+            "本次没有扣除生成次数",
+        ),
     ],
 )
 def test_public_role_service_errors_have_stable_user_copy(error: Exception, expected: str) -> None:
     message = role_service_user_message(error)
     assert expected in message
     assert "private server detail" not in message
+    assert "provider_content_rejected" not in message
+    assert "provider_technical_failure" not in message
     assert "T2I" not in message
     assert "I2V" not in message
 

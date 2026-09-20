@@ -14,8 +14,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QKeySequence, QPixmap
+from PySide6.QtCore import QSize, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QGridLayout,
+    QHBoxLayout,
     QKeySequenceEdit,
     QLabel,
     QMessageBox,
@@ -33,6 +34,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -42,8 +44,12 @@ from moeguard.pet.role_assets import discover_bundled_roles
 from moeguard.role_pilot import PILOT_NOTICE_TEXT
 from moeguard.roles import PackageKey, RoleContractError, RoleLibrary
 from moeguard.ui import theme
+from moeguard.utils.paths import resource_path
 
 logger = logging.getLogger(__name__)
+
+_GITHUB_PROJECT_URL = "https://github.com/V01d666/MoeGuard"
+_AFDIAN_PROJECT_URL = "https://ifdian.net/a/moeguard"
 
 
 def _make_section(
@@ -123,6 +129,24 @@ class SettingsDialog(QDialog):
         # D63/D70：AI 对话和形象生成均未进入 MVP，不得造成“可用”的错觉。
         self._build_general_tab()
 
+        self.external_links_footer = QWidget()
+        footer_layout = QHBoxLayout(self.external_links_footer)
+        footer_layout.setContentsMargins(0, 0, 0, 0)
+        footer_layout.setSpacing(6)
+        self.github_link_button = self._external_link_button(
+            icon_name="github.svg",
+            label="GitHub",
+            url=_GITHUB_PROJECT_URL,
+        )
+        self.afdian_link_button = self._external_link_button(
+            icon_name="afdian.svg",
+            label="爱发电",
+            url=_AFDIAN_PROJECT_URL,
+        )
+        footer_layout.addWidget(self.github_link_button)
+        footer_layout.addWidget(self.afdian_link_button)
+        footer_layout.addStretch(1)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("保存")
         buttons.button(QDialogButtonBox.Cancel).setText("取消")
@@ -130,7 +154,33 @@ class SettingsDialog(QDialog):
         buttons.button(QDialogButtonBox.Cancel).setStyleSheet(theme.button_qss("normal"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        footer_layout.addWidget(buttons)
+        layout.addWidget(self.external_links_footer)
+
+    def _external_link_button(
+        self, *, icon_name: str, label: str, url: str
+    ) -> QToolButton:
+        button = QToolButton(self.external_links_footer)
+        button.setAutoRaise(True)
+        button.setIcon(QIcon(str(resource_path("icons", icon_name))))
+        button.setIconSize(QSize(26, 26))
+        button.setFixedSize(38, 38)
+        button.setToolTip(f"在{label}查看萌卫（将在浏览器中打开）")
+        button.setAccessibleName(f"打开萌卫的{label}页面")
+        button.setStyleSheet(
+            "QToolButton { border: none; padding: 6px; border-radius: 8px; }"
+            f"QToolButton:hover {{ background: {theme.SECTION_BG}; }}"
+            f"QToolButton:pressed {{ background: {theme.BORDER}; }}"
+        )
+        button.clicked.connect(
+            lambda _checked=False, target=url: self._open_external_url(target)
+        )
+        return button
+
+    @staticmethod
+    def _open_external_url(url: str) -> None:
+        if not QDesktopServices.openUrl(QUrl(url)):
+            logger.warning("无法用系统默认浏览器打开项目页面: %s", url)
 
     # ------------------------------------------------------------------ #
     # 标签页 1: 安防
@@ -260,7 +310,7 @@ class SettingsDialog(QDialog):
             except RoleContractError as exc:
                 logger.warning("忽略损坏的角色包配置: %s", exc)
         if managed_key is not None:
-            selected_role = self.role_selector.findData(managed_key)
+            selected_role = self._find_role_item(managed_key)
             if selected_role < 0:
                 logger.warning("当前受管角色不可用，设置页回退到 Lumen: %s", managed_key)
                 selected_role = self.role_selector.findData("lumen")
@@ -393,6 +443,20 @@ class SettingsDialog(QDialog):
             isinstance(self.role_selector.currentData(), PackageKey)
         )
 
+    def _find_role_item(self, expected: object) -> int:
+        """Find role data with Python equality instead of QVariant identity.
+
+        PySide wraps arbitrary Python objects stored in a combo box.  Qt's
+        ``findData`` may then compare two equal ``PackageKey`` instances by
+        wrapper identity, causing an active managed role to appear missing.
+        Reading each item back and comparing in Python preserves the package
+        key's value semantics in both source and frozen builds.
+        """
+        for index in range(self.role_selector.count()):
+            if self.role_selector.itemData(index) == expected:
+                return index
+        return -1
+
     def _update_role_preview(self) -> None:
         selected = self.role_selector.currentData()
         root = None
@@ -459,14 +523,14 @@ class SettingsDialog(QDialog):
             )
             return
 
-        index = self.role_selector.findData(installed.key)
+        index = self._find_role_item(installed.key)
         if index < 0:
             self.role_selector.addItem(
                 f"{installed.package.display_name}"
                 f"（自定义 v{installed.key.package_version}）",
                 installed.key,
             )
-            index = self.role_selector.findData(installed.key)
+            index = self._find_role_item(installed.key)
         self.role_selector.setCurrentIndex(index)
         QMessageBox.information(
             self,

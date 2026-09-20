@@ -11,6 +11,12 @@ Bundled third-party model files:
 - SFace face-recognition model — Apache-2.0
   https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface
 
+Settings-page link icons are derived from Simple Icons v16, released under
+CC0-1.0: GitHub and Afdian. Product names and trademarks remain the property
+of their respective owners; their use here only identifies the linked service
+and does not imply endorsement.
+https://github.com/simple-icons/simple-icons
+
 The bundled Lumen, Poppy, and Rook role assets are original MoeGuard project
 assets created with generative tools and author selection/editing. They are
 distributed with this project under Apache-2.0.

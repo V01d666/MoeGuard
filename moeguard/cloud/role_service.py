@@ -538,6 +538,20 @@ class ServiceTaskSnapshot:
             raise ValueError("only failed service tasks may carry retry metadata")
 
 
+class RoleServiceTaskFailure(RuntimeError):
+    """Stable client-side representation of one terminal service task failure.
+
+    The service error code is intentionally kept separate from the exception
+    message so UI code can select safe, user-facing copy without echoing
+    provider details or arbitrary server text.
+    """
+
+    def __init__(self, error_code: str, *, retryable: bool) -> None:
+        self.error_code = error_code or "service_task_failed"
+        self.retryable = bool(retryable)
+        super().__init__("role service task did not complete")
+
+
 class RoleServiceTransport(Protocol):
     """Transport boundary; implementations may use HTTP, IPC, or a fake store."""
 

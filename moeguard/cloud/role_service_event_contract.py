@@ -47,6 +47,8 @@ _CLIENT_ERROR_CODES = frozenset(
         "hash_mismatch",
         "archive_invalid",
         "local_storage_failed",
+        "provider_content_rejected",
+        "provider_technical_failure",
         "task_failed",
         "task_not_found",
     }
