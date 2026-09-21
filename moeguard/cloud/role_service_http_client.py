@@ -231,8 +231,8 @@ def _json_bytes(value: Any) -> bytes:
     ).encode()
 
 
-def _snapshot_from_dict(raw: Any) -> ServiceTaskSnapshot:
-    if not isinstance(raw, dict) or set(raw) != {
+_REQUIRED_SNAPSHOT_FIELDS = frozenset(
+    {
         "remote_task_id",
         "spec_sha256",
         "status",
@@ -240,8 +240,24 @@ def _snapshot_from_dict(raw: Any) -> ServiceTaskSnapshot:
         "retryable",
         "error_code",
         "result_sha256",
-    }:
+    }
+)
+
+
+def _snapshot_from_dict(raw: Any) -> ServiceTaskSnapshot:
+    """Read a task snapshot, tolerating fields this client does not know.
+
+    Requiring an exact key set made the protocol impossible to extend: any
+    field added server-side turned every poll into a hard failure, mid-wait, on
+    a task that is running and already billed. Unknown fields are ignored and
+    missing required ones are still refused.
+    """
+
+    if not isinstance(raw, dict) or not _REQUIRED_SNAPSHOT_FIELDS <= set(raw):
         raise ValueError("HTTP service task snapshot schema is invalid")
+    estimated = raw.get("estimated_seconds", 0)
+    if isinstance(estimated, bool) or not isinstance(estimated, int) or estimated < 0:
+        estimated = 0
     return ServiceTaskSnapshot(
         remote_task_id=str(raw["remote_task_id"]),
         spec_sha256=str(raw["spec_sha256"]),
@@ -250,6 +266,7 @@ def _snapshot_from_dict(raw: Any) -> ServiceTaskSnapshot:
         retryable=bool(raw["retryable"]),
         error_code=str(raw["error_code"]),
         result_sha256=str(raw["result_sha256"]),
+        estimated_seconds=estimated,
     )
 
 
@@ -502,6 +519,23 @@ class HttpRoleServiceTransport:
             return ServiceAssetRef.from_dict(self._data(payload))
 
         return self._retry_transfer(attempt)
+
+    def preflight(self, *, timeout: float) -> None:
+        """Confirm the whole path to the service answers before a task starts.
+
+        Uploading a reference image is the first thing a task does and it is
+        also the most expensive thing to lose: a stalled proxy turns a few
+        megabytes into minutes of waiting that end in a failure the user could
+        have been told about immediately. This spends one small authenticated
+        request on the same host, TLS settings and credentials the task will
+        use, so a link that cannot carry the task fails here instead.
+
+        ``/healthz`` deliberately is not used. It is answered at the CDN edge,
+        so it stays ``200`` while the origin is down -- a probe that passes
+        while the service is unreachable is worse than no probe at all.
+        """
+
+        self._request("GET", "/v1/account", timeout=timeout)
 
     def account_summary(self) -> RoleServiceAccountSummary:
         payload, _headers = self._request("GET", "/v1/account")

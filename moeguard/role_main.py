@@ -203,6 +203,8 @@ def configure_role_workbench(
             client_events=event_reporter if transport is not None else None,
             client_event_entrypoint="settings",
             account_id=account_id,
+            notify_user=app.notify_workbench_result,
+            announce_wait=app.announce_workbench_wait,
         )
 
         if binding_origin is not None and not generation_available:

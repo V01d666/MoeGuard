@@ -188,6 +188,28 @@ def _is_transient_poll_error(error: BaseException) -> bool:
     return False
 
 
+_PREFLIGHT_TIMEOUT_SECONDS = 8.0
+"""Bound the pre-submission probe.
+
+The probe exists to save the user minutes, so it must never become a wait of
+its own. Eight seconds clears a slow cross-border handshake while still
+answering long before a multi-megabyte upload would have.
+"""
+
+
+class _ServiceLinkUnavailable(RuntimeError):
+    """The service could not be reached before a task was created.
+
+    Distinct from a fault during the wait: nothing was submitted, so no remote
+    task exists. Telling the user to resume one would send them looking for
+    something that was never created.
+    """
+
+    def __init__(self, cause: object) -> None:
+        super().__init__("role service preflight failed")
+        self.cause = cause
+
+
 def _service_poll_interval(waited_seconds: float) -> float:
     """Widen the polling interval as a task keeps running.
 
@@ -202,6 +224,48 @@ def _service_poll_interval(waited_seconds: float) -> float:
         if waited_seconds < threshold:
             return interval
     return _SERVICE_POLL_MAX_SECONDS
+
+
+def _format_wait_estimate(estimated_seconds: int) -> str:
+    """Describe a likely wait as a magnitude rather than a countdown.
+
+    A precise number invites the user to watch it: quote sixty-three seconds
+    and the task looks broken at sixty-four. Round spans say the same thing
+    without setting a deadline the service cannot keep, and an unknown wait is
+    left unquoted instead of guessed.
+    """
+
+    if estimated_seconds <= 0:
+        return ""
+    if estimated_seconds < 60:
+        step = 15
+        upper = -(-estimated_seconds // step) * step
+        return f"通常不到 {max(upper, step)} 秒"
+    lower = estimated_seconds // 60
+    upper = lower + 1
+    return f"通常需要 {lower}–{upper} 分钟"
+
+
+def _format_wait_status(*, waited_seconds: int, estimated_seconds: int) -> str:
+    """Say how long this wait has run, next to what a wait usually costs.
+
+    Elapsed time is always shown: it is the one number that is certainly true
+    and it distinguishes a service that is working from one that has stopped
+    answering. The estimate is dropped once reality passes it, because
+    repeating it then tells the user the task is late when the honest
+    statement is that it is slower than usual and still running.
+    """
+
+    waited = max(int(waited_seconds), 0)
+    if waited < 60:
+        elapsed = f"已等待 {waited} 秒"
+    else:
+        elapsed = f"已等待 {waited // 60} 分 {waited % 60} 秒"
+    if estimated_seconds > 0 and waited <= estimated_seconds:
+        return f"{elapsed} · {_format_wait_estimate(estimated_seconds)}"
+    if estimated_seconds > 0:
+        return f"{elapsed} · 比平时久一些，任务仍在云端继续"
+    return elapsed
 
 
 def _account_summary_text(value: RoleServiceAccountSummary) -> str:
@@ -455,7 +519,7 @@ class WorkbenchRequest:
         if not _ROLE_ID_RE.fullmatch(self.role_id):
             raise ValueError("角色 ID 需为 3~48 位小写字母、数字或连字符")
         if not self.display_name.strip() or len(self.display_name.strip()) > 80:
-            raise ValueError("角色名称 / 概念不能为空且最多 80 个字符")
+            raise ValueError("角色名称不能为空且最多 80 个字符")
         if self.input_mode not in {"text", "image"}:
             raise ValueError("未知的角色输入方式")
         if not 1 <= self.candidate_count <= 4:
@@ -1317,6 +1381,10 @@ class RoleWorkbenchDialog(QDialog):
     install_requested = Signal(object)
     binding_requested = Signal()
     unbinding_requested = Signal()
+    # Emitted from the worker thread when a task is accepted by the service.
+    # A bubble is a widget, so it must be built on the UI thread; a direct
+    # call from the worker would be a cross-thread widget construction.
+    _wait_announced = Signal(str)
 
     def __init__(
         self,
@@ -1335,10 +1403,23 @@ class RoleWorkbenchDialog(QDialog):
         client_events: ClientEventReporter | None = None,
         client_event_entrypoint: str = "settings",
         account_id: str = "",
+        notify_user: Callable[[str, str], None] | None = None,
+        announce_wait: Callable[[str], None] | None = None,
     ) -> None:
         super().__init__(parent)
         self._backend = backend
         self._account_id = account_id.strip()
+        # Generation takes minutes the service cannot shorten, so the wait is
+        # worth more spent elsewhere. Calling the user back is what makes
+        # leaving safe; without it, looking away means missing the result.
+        self._notify_user = notify_user
+        # Said once when a task starts, by the pet that is already on screen:
+        # a user who submits and walks away otherwise has no sign anything is
+        # running until it ends.
+        self._announce_wait = announce_wait
+        self._wait_announced_for = ""
+        self._announce_worker_result = True
+        self._wait_announced.connect(self._deliver_wait_announcement)
         # Waiting for a remote task sleeps between polls. Tests replace this
         # seam so they can exercise the retry cadence without real delays;
         # patching the shared time module instead would freeze the Qt helpers
@@ -1737,10 +1818,10 @@ class RoleWorkbenchDialog(QDialog):
         self.display_name.setPlaceholderText("例如：DeepSeek 鲸鱼娘")
         self.role_id = QLineEdit(_new_role_id())
         self.role_id.setReadOnly(True)
-        common_form.addRow("角色名称 / 概念", self.display_name)
+        common_form.addRow("角色名称", self.display_name)
         create_stage_layout.addLayout(common_form)
         self._refresh_editable_roles()
-        concept_hint = QLabel("文字生成时，名称也会参与角色概念与立绘生成。")
+        concept_hint = QLabel("名称只用于标识这个角色，不会影响立绘长相。")
         concept_hint.setWordWrap(True)
         concept_hint.setProperty("role", "hint")
         create_stage_layout.addWidget(concept_hint)
@@ -2089,12 +2170,12 @@ class RoleWorkbenchDialog(QDialog):
         completion_layout.setSpacing(8)
         bottom = QHBoxLayout()
         bottom.setSpacing(10)
-        self.save_hint = QLabel("完成待机动作后，即可保存角色包或安装到萌卫。")
+        self.save_hint = QLabel("完成待机动作后，即可导出角色包或安装到萌卫。")
         self.save_hint.setProperty("role", "hint")
         self.save_hint.setAlignment(Qt.AlignRight)
         completion_layout.addWidget(self.save_hint)
 
-        self.save_button = QPushButton("保存角色包")
+        self.save_button = QPushButton("保存并导出至…")
         self.save_button.setEnabled(False)
         self.save_button.setStyleSheet(theme.button_qss())
         self.save_button.clicked.connect(self._save_package)
@@ -3022,8 +3103,16 @@ class RoleWorkbenchDialog(QDialog):
         self.detail_budget.setStyleSheet("color: #b42318;" if invalid else "")
 
     def _compiled_text_details(self) -> str:
+        """Assemble the appearance prompt from the description fields only.
+
+        The name is deliberately absent. It labels the package folder and the
+        pet's caption, defaults to a Chinese phrase, and is not art direction;
+        feeding it to the image model made that phrase appear written in the
+        corner of generated candidates. What the character looks like must
+        come only from the fields below it.
+        """
+
         values = (
-            ("Character name and concept", self.display_name.text()),
             ("Visual style and mood", self.style_text.text()),
             ("Main color palette", self.palette.text()),
             ("Hair", self.hair.text()),
@@ -3447,6 +3536,40 @@ class RoleWorkbenchDialog(QDialog):
         )
         return self._read_task_result(artifact_root, context)
 
+    def _preflight_service_link(
+        self, local_task_id: str, progress: ProgressCallback
+    ) -> None:
+        """Answer a dead link before the first byte of a task is uploaded.
+
+        A task starts by uploading a reference image of a few megabytes. Behind
+        a stalled proxy that upload crawls to a timeout and retries, so the user
+        waits minutes to learn something the service could have said at once --
+        which is exactly what a maintainer hit with a VPN node that had stopped
+        forwarding.
+
+        Skipped once a task has been submitted: a resumed task already exists on
+        the service, and refusing to poll it because a probe failed would strand
+        a task that is still running.
+        """
+
+        transport = self._service_transport
+        probe = getattr(transport, "preflight", None)
+        if probe is None:
+            return
+        if self._service_client is not None:
+            if self._service_client.binding_store.load(local_task_id):
+                return
+        progress("正在检查与生成服务的连接…", 1)
+        try:
+            probe(timeout=_PREFLIGHT_TIMEOUT_SECONDS)
+        except (RoleServiceConnectionError, RoleServiceHttpError) as error:
+            # An HTTP answer means the link works: authentication and quota
+            # problems are real answers the task itself reports with its own
+            # copy, so only a transport fault stops the task here.
+            if isinstance(error, RoleServiceHttpError) and error.status < 500:
+                return
+            raise _ServiceLinkUnavailable(error) from error
+
     def _execute_service_task(
         self,
         local_task_id: str,
@@ -3455,6 +3578,7 @@ class RoleWorkbenchDialog(QDialog):
     ) -> CandidateResult | PackageResult:
         if self._service_client is None or self._service_transport is None:
             raise ValueError("工作台服务客户端尚未配置")
+        self._preflight_service_link(local_task_id, progress)
         service_request = self._prepare_service_request(local_task_id, context)
         if self._task_store.load(local_task_id).status == "cancel_requested":
             self._task_store.acknowledge_cancel(local_task_id)
@@ -3462,6 +3586,7 @@ class RoleWorkbenchDialog(QDialog):
         snapshot = self._service_client.ensure_submitted(
             local_task_id, service_request
         )
+        self._announce_long_wait()
         progress(f"任务 {local_task_id[:8]}… 已提交，正在查询同一远端任务…", 2)
 
         if self._local_service_executor is not None and snapshot.status in {
@@ -3517,7 +3642,12 @@ class RoleWorkbenchDialog(QDialog):
                     retryable=record.retryable,
                 )
             progress(
-                f"正在查询远端任务 {local_task_id[:8]}…；不会重复提交",
+                _format_wait_status(
+                    waited_seconds=int(waited),
+                    estimated_seconds=getattr(
+                        self._service_client, "last_estimated_seconds", 0
+                    ),
+                ),
                 record.progress,
             )
             delay = _service_poll_interval(waited)
@@ -3818,10 +3948,13 @@ class RoleWorkbenchDialog(QDialog):
         package_ready = self._package_result is not None
         if package_ready:
             self.save_hint.setText("角色包已就绪：可以导出，也可以直接保存并安装。")
-            self.save_button.setToolTip("将完整角色包导出到你选择的位置")
-            self.install_button.setToolTip("保存角色包并立即切换为当前桌宠")
+            self.save_button.setToolTip(
+                "将完整角色包导出到你选择的位置；"
+                "之后可在「设置 → 导入角色…」装回来"
+            )
+            self.install_button.setToolTip("保存到角色库并立即切换为当前桌宠")
         else:
-            self.save_hint.setText("完成待机动作后，即可保存角色包或安装到萌卫。")
+            self.save_hint.setText("完成待机动作后，即可导出角色包或安装到萌卫。")
             disabled_reason = "请先选择身份候选并生成至少一个待机动作"
             self.save_button.setToolTip(disabled_reason)
             self.install_button.setToolTip(disabled_reason)
@@ -3863,11 +3996,18 @@ class RoleWorkbenchDialog(QDialog):
         operation: Callable[[ProgressCallback], object],
         success: Callable[[object], None],
         failure: Callable[[object], None] | None = None,
+        *,
+        announce_result: bool = True,
     ) -> None:
         if self._worker is not None:
             return
         self._current_operation = operation
         self._current_success = success
+        # Housekeeping queries run through this same plumbing but are not work
+        # the user asked for. Announcing them delivers a second native balloon
+        # for one finished task, which teaches people to dismiss the one that
+        # actually carries a result.
+        self._announce_worker_result = announce_result
         worker = _BackendWorker(operation)
         self._worker = worker
         worker.progress.connect(self._on_progress)
@@ -3907,7 +4047,7 @@ class RoleWorkbenchDialog(QDialog):
                     f"次数刷新失败：{role_service_user_message(error)}"
                 )
 
-        self._start_worker(operation, success, failure)
+        self._start_worker(operation, success, failure, announce_result=False)
 
     def _open_credit_dialog(self) -> None:
         if self._service_transport is None or self._worker is not None:
@@ -4683,9 +4823,9 @@ class RoleWorkbenchDialog(QDialog):
     def _save_package(self) -> None:
         if self._package_result is None or self._active_request is None:
             return
-        if not self._confirm_result_use("保存角色包"):
+        if not self._confirm_result_use("导出角色包"):
             return
-        parent = QFileDialog.getExistingDirectory(self, "选择角色包保存位置")
+        parent = QFileDialog.getExistingDirectory(self, "选择角色包导出位置")
         if not parent:
             return
         if self._editing_key is None:
@@ -4703,9 +4843,12 @@ class RoleWorkbenchDialog(QDialog):
             _accept_generated_package(self._package_result.package_root)
             shutil.copytree(self._package_result.package_root, destination)
         except (OSError, ValueError, RoleContractError) as exc:
-            QMessageBox.critical(self, "保存失败", str(exc))
+            QMessageBox.critical(self, "导出失败", str(exc))
             return
-        self.status.setText(f"角色包已保存到：{destination}")
+        self.status.setText(
+            f"角色包已导出到：{destination}\n"
+            "需要装回桌宠时，在「设置 → 导入角色…」里选择这个文件夹即可。"
+        )
         self._result_saved = True
 
     def _request_install(self) -> None:
@@ -4799,15 +4942,71 @@ class RoleWorkbenchDialog(QDialog):
         )
         return answer == QMessageBox.Yes
 
+    def _announce_long_wait(self) -> None:
+        """Have the pet say a task started, once per task.
+
+        Called from the worker thread, so the text is handed to the UI thread
+        through a signal rather than touching a widget directly. Repeats are
+        suppressed per task: a resumed wait is the same task continuing, and
+        repeating the line would suggest a second one had started.
+        """
+
+        if self._announce_wait is None:
+            return
+        task_id = self._active_task_id or "task"
+        if self._wait_announced_for == task_id:
+            return
+        self._wait_announced_for = task_id
+        self._wait_announced.emit("正在为你制作新形象，需要几分钟，先去忙别的也没关系～")
+
+    def _deliver_wait_announcement(self, text: str) -> None:
+        announce = self._announce_wait
+        if announce is None:
+            return
+        try:
+            announce(text)
+        except Exception:
+            # A pet that cannot speak must not fail the task it was
+            # describing.
+            return
+
+    def _call_user_back(self, title: str, message: str) -> None:
+        """Reach the user wherever they went, but only if they left.
+
+        Notifying someone about what is already on their screen is noise, and
+        noise is what teaches people to ignore notifications -- including the
+        one that matters. Delivery failures are swallowed: a desktop that
+        refuses notifications must not turn a finished task into an error.
+        """
+
+        notify = self._notify_user
+        if notify is None or self._client_event_foreground():
+            return
+        try:
+            notify(title, message)
+        except Exception:
+            return
+
     def _on_progress(self, message: str, percent: int) -> None:
-        del percent  # 供应商只返回阶段状态；不向用户展示虚构百分比。
+        # The percentage is now measured: the worker publishes generations as
+        # they finish and reserves the tail for post-processing. What it must
+        # never become is a smooth bar -- the provider reports a generation as
+        # running or finished and never how far along it is, so anything
+        # smoother than this would be invented.
         self.status.setText(message)
+        self._activity_percent = percent if 0 < percent < 100 else 0
+        self._rotate_activity_indicator()
 
     def _rotate_activity_indicator(self) -> None:
         current = self.activity_indicator.text()
         choices = [face for face in self._activity_faces if face not in current]
         face = random.choice(choices or self._activity_faces)
-        self.activity_indicator.setText(f"{face}  正在认真制作中…")
+        percent = getattr(self, "_activity_percent", 0)
+        # The rotating face says the app is alive; the percentage says the task
+        # is. Keeping them in one label means the timer cannot wipe out the
+        # measured value a moment after it arrives.
+        suffix = f" {percent}%" if percent else ""
+        self.activity_indicator.setText(f"{face}  正在认真制作中…{suffix}")
 
     def _clear_terminal_task_context(self) -> None:
         if self._active_task_id:
@@ -4833,8 +5032,18 @@ class RoleWorkbenchDialog(QDialog):
             self._choose_image()
 
     def _on_failure(self, error: object) -> None:
+        if isinstance(error, _ServiceLinkUnavailable):
+            self._on_preflight_failure(error)
+            self._call_user_back("萌卫桌宠工坊", "未能连接生成服务，任务没有开始。")
+            return
         message = role_service_user_message(error)
         error_code = self._client_error_code(error)
+        # Announced once here, before the branches: a task that ended while
+        # the user was away must reach them whichever way it ended, and each
+        # branch below returns on its own path. A housekeeping query that
+        # fails stays silent -- the user never started it.
+        if self._announce_worker_result:
+            self._call_user_back("萌卫桌宠工坊", f"任务未完成：{message}")
         remote_task_id = self._remote_task_id(self._active_task_id)
         self._record_client_event(
             "client_error_shown",
@@ -4919,6 +5128,36 @@ class RoleWorkbenchDialog(QDialog):
             "请点击“恢复失败任务”，不要重新生成。",
         )
 
+    def _on_preflight_failure(self, error: _ServiceLinkUnavailable) -> None:
+        """Report an unreachable service without inventing a task to resume.
+
+        Nothing was submitted and nothing was charged, so the copy points at the
+        link itself -- a proxy or VPN that has stopped forwarding is the cause
+        seen in practice, and it is something the user can actually fix.
+        """
+
+        self._clear_terminal_task_context()
+        # Deliberately not role_service_user_message: that copy ends in "resume
+        # the same task", which is written for a fault during the wait. Here no
+        # task was ever created.
+        cause = error.cause
+        if (
+            isinstance(cause, RoleServiceConnectionError)
+            and cause.code == "service_timeout"
+        ):
+            detail = "连接生成服务超时。"
+        else:
+            detail = "暂时无法连接生成服务。"
+        self.status.setText(f"未能连接生成服务：{detail}")
+        QMessageBox.warning(
+            self,
+            "无法连接生成服务",
+            f"{detail}\n\n"
+            "本次没有提交任务，也没有扣除生成次数。\n"
+            "如果正在使用 VPN 或代理，请尝试关闭后重试："
+            "节点停止转发时，连接会卡住而不是立刻报错。",
+        )
+
     def _on_operation_success(
         self, value: object, success: Callable[[object], None]
     ) -> None:
@@ -4926,6 +5165,8 @@ class RoleWorkbenchDialog(QDialog):
         self._retry_success = None
         self.resume_task_button.setEnabled(False)
         success(value)
+        if self._announce_worker_result:
+            self._call_user_back("萌卫桌宠工坊", "生成完成了，回来看看吧。")
 
     def _resume_failed_task(self) -> None:
         if not self._generation_available:

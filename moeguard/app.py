@@ -260,6 +260,46 @@ class MoeGuardApp(QObject):
             )
         return False
 
+    def announce_workbench_wait(self, message: str) -> None:
+        """Let the pet explain a long task that just started.
+
+        Only the pet speaks here, deliberately: the user is still at the
+        workbench when a task starts, so a tray balloon would be a
+        notification about something already on their screen. The pet is
+        ambient -- it says the wait is expected without demanding attention.
+        """
+
+        pet = self._pet_window
+        if pet is None:
+            return
+        try:
+            pet.show_message(message)
+        except Exception:
+            logger.debug("桌宠等待提示失败", exc_info=True)
+
+    def notify_workbench_result(self, title: str, message: str) -> None:
+        """Call the user back after a wait they were free to walk away from.
+
+        Both channels are used on purpose and they fail differently: the tray
+        balloon survives the workbench being minimised or buried but is
+        silently dropped by some Windows focus-assist settings, while the pet
+        is already on screen and speaks even when notifications are muted.
+        Neither is allowed to raise -- a refused notification must not turn a
+        finished task into an error.
+        """
+
+        if self._tray is not None:
+            try:
+                self._tray.show_message(title, message)
+            except Exception:
+                logger.debug("托盘通知发送失败", exc_info=True)
+        pet = self._pet_window
+        if pet is not None:
+            try:
+                pet.show_message(message)
+            except Exception:
+                logger.debug("桌宠气泡提示失败", exc_info=True)
+
     # ------------------------------------------------------------------ #
     # 启动
     # ------------------------------------------------------------------ #

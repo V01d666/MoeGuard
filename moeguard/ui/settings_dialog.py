@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
 from moeguard.config import AppConfig
 from moeguard.pet.role_assets import discover_bundled_roles
 from moeguard.role_pilot import PILOT_NOTICE_TEXT
-from moeguard.roles import PackageKey, RoleContractError, RoleLibrary
+from moeguard.roles import InstalledRole, PackageKey, RoleContractError, RoleLibrary
 from moeguard.ui import theme
 from moeguard.utils.paths import resource_path
 
@@ -84,6 +84,22 @@ def _make_section(
     form.setVerticalSpacing(8)
     outer.addLayout(form)
     return frame, form
+
+
+def import_role_source(library: RoleLibrary, source: Path) -> InstalledRole:
+    """Install a role the user points at, whether it is an archive or a folder.
+
+    The workbench saves a role by copying a plain directory to wherever the
+    user chooses, so what someone has on disk is usually a folder rather than
+    a ``.moeguard-role`` file. Accepting only the archive left paid roles with
+    no way back into the library. Both shapes route through the same staging
+    and verification gate in ``RoleLibrary``; nothing here relaxes it.
+    """
+
+    source = Path(source)
+    if source.is_dir():
+        return library.install_directory(source)
+    return library.install(source)
 
 
 class SettingsDialog(QDialog):
@@ -335,7 +351,10 @@ class SettingsDialog(QDialog):
         role_actions_layout.setContentsMargins(0, 0, 0, 0)
         role_actions_layout.setSpacing(8)
         role_action_buttons: list[QPushButton] = []
-        self.import_role_button = QPushButton("导入角色包…")
+        self.import_role_button = QPushButton("导入角色…")
+        self.import_role_button.setToolTip(
+            "选择在桌宠工坊点“保存并导出至…”得到的文件夹，把角色装回本地角色库"
+        )
         self.import_role_button.setStyleSheet(theme.button_qss("normal"))
         self.import_role_button.clicked.connect(self._import_role_package)
         role_action_buttons.append(self.import_role_button)
@@ -504,22 +523,30 @@ class SettingsDialog(QDialog):
         )
 
     def _import_role_package(self) -> None:
-        archive_name, _ = QFileDialog.getOpenFileName(
+        """Import a role folder the user saved from the workbench.
+
+        Only a directory is offered. "Save role package" copies a plain
+        folder, and every ``.moeguard-role`` archive in the product is an
+        internal transfer format -- uploads, the service download, the test
+        double -- so no user ever holds one. Asking which shape they had was
+        a question with one real answer. ``import_role_source`` still accepts
+        an archive for shared packages, should that ever become a feature.
+        """
+
+        selected = QFileDialog.getExistingDirectory(
             self,
-            "导入 MoeGuard 角色包",
-            "",
-            "MoeGuard 角色包 (*.moeguard-role)",
+            "选择已保存的角色文件夹",
         )
-        if not archive_name:
+        if not selected:
             return
         try:
-            installed = self._role_library.install(Path(archive_name))
+            installed = import_role_source(self._role_library, Path(selected))
         except (OSError, RoleContractError) as exc:
             logger.warning("角色包导入失败: %s", exc)
             QMessageBox.critical(
                 self,
                 "角色包导入失败",
-                "文件未通过安全或完整性校验，没有写入本地角色库。",
+                "所选内容未通过安全或完整性校验，没有写入本地角色库。",
             )
             return
 

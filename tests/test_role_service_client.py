@@ -619,3 +619,72 @@ def test_candidate_image_rejects_decompression_scale_dimensions(tmp_path: Path) 
         validate_role_service_image(candidate, "image/png")
 
     assert blocked.value.code == ContractErrorCode.RESOURCE_LIMIT
+
+
+def test_an_unknown_snapshot_field_does_not_break_an_older_client() -> None:
+    """A task snapshot must tolerate fields a client does not know yet.
+
+    The parser compared the key set for exact equality, so adding any field
+    server-side turned every poll into a hard failure rather than something a
+    client could ignore. That makes the protocol impossible to extend without
+    replacing every client at once, and it fails in the worst place: mid-wait,
+    on a task that is running and being billed.
+    """
+
+    from moeguard.cloud.role_service_http_client import _snapshot_from_dict
+
+    snapshot = _snapshot_from_dict(
+        {
+            "remote_task_id": "role-" + "a" * 40,
+            "spec_sha256": "b" * 64,
+            "status": "running",
+            "progress": 31,
+            "retryable": False,
+            "error_code": "",
+            "result_sha256": "",
+            "a_field_from_a_newer_service": {"nested": [1, 2, 3]},
+        }
+    )
+
+    assert snapshot.status == "running"
+    assert snapshot.progress == 31
+
+
+def test_a_missing_required_snapshot_field_is_still_refused() -> None:
+    """Tolerating additions must not turn into accepting a broken payload."""
+
+    from moeguard.cloud.role_service_http_client import _snapshot_from_dict
+
+    with pytest.raises(ValueError):
+        _snapshot_from_dict(
+            {
+                "remote_task_id": "role-" + "a" * 40,
+                "spec_sha256": "b" * 64,
+                "status": "running",
+                # progress missing
+                "retryable": False,
+                "error_code": "",
+                "result_sha256": "",
+            }
+        )
+
+
+def test_a_client_is_told_how_long_a_wait_usually_takes() -> None:
+    """The estimate must survive the round trip so a client can show it."""
+
+    from moeguard.cloud.role_service_http_client import _snapshot_from_dict
+
+    snapshot = _snapshot_from_dict(
+        {
+            "remote_task_id": "role-" + "a" * 40,
+            "spec_sha256": "b" * 64,
+            "status": "running",
+            "progress": 31,
+            "retryable": False,
+            "error_code": "",
+            "result_sha256": "",
+            "estimated_seconds": 210,
+        }
+    )
+
+    assert snapshot.estimated_seconds == 210

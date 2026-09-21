@@ -19,7 +19,7 @@ import logging
 
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QRegion, QWheelEvent
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 from moeguard.pet.frame_animation import FrameAnimationController
 from moeguard.ui import theme
@@ -316,7 +316,12 @@ class PetWindow(QWidget):
         self._bubble_anchor_top_ratio = visible.y() / height
 
     def _reposition_bubble(self) -> None:
-        """按动作级稳定锚点居中，并维持固定的垂直间距。"""
+        """按动作级稳定锚点居中，并维持固定的垂直间距。
+
+        贴边时上方可能没有容身之处：桌宠吸附到屏幕顶端后，原本留给气泡的空间
+        已经不存在，仍按上方摆放会把气泡推到屏幕外——用户在工作台说"桌宠正在
+        说话"的那一刻什么也看不到。上方放不下就翻到下方，再把左右夹回屏幕内。
+        """
         if self._bubble is None:
             return
         if (
@@ -336,6 +341,21 @@ class PetWindow(QWidget):
             - _BUBBLE_CONTENT_GAP
             - self._bubble.height()
         )
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            bounds = screen.availableGeometry()
+            if by < bounds.y():
+                # 上方放不下就翻到角色下方；那里的可见底边同样由锚点决定。
+                visible = self._current_content_rect()
+                by = (
+                    top_left.y()
+                    + visible.y()
+                    + visible.height()
+                    + _BUBBLE_CONTENT_GAP
+                )
+                by = min(by, bounds.y() + bounds.height() - self._bubble.height())
+                by = max(by, bounds.y())
+            bx = max(bounds.x(), min(bx, bounds.x() + bounds.width() - self._bubble.width()))
         self._bubble.move(bx, by)
 
     def moveEvent(self, event) -> None:  # noqa: N802

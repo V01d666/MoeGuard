@@ -514,6 +514,14 @@ class ServiceTaskSnapshot:
     retryable: bool = False
     error_code: str = ""
     result_sha256: str = ""
+    estimated_seconds: int = 0
+    """How long a task like this usually takes, or 0 when not known.
+
+    Deliberately advisory: the value is derived from what recent comparable
+    tasks actually took, so a client can set an expectation instead of showing
+    an unlabelled spinner. It carries no scheduling meaning and a client that
+    ignores it behaves exactly as before.
+    """
 
     def __post_init__(self) -> None:
         if not _REMOTE_TASK_ID_RE.fullmatch(self.remote_task_id):
@@ -526,6 +534,8 @@ class ServiceTaskSnapshot:
             raise ValueError("unknown service task status")
         if isinstance(self.progress, bool) or not 0 <= self.progress <= 100:
             raise ValueError("service task progress must be 0-100")
+        if isinstance(self.estimated_seconds, bool) or self.estimated_seconds < 0:
+            raise ValueError("service task estimate must not be negative")
         if self.status == "succeeded":
             if self.progress != 100 or len(self.result_sha256) != 64:
                 raise ValueError("succeeded service task requires a result hash")
@@ -725,6 +735,13 @@ class RoleServiceClient:
             binding_store.root.parent / "service-requests"
         )
         self.result_event_callback = result_event_callback
+        self.last_estimated_seconds = 0
+        """What the service last said a comparable task usually costs.
+
+        Advisory and transient: it reflects recent behaviour at the moment of
+        the last poll, so it is never written to the task journal where it
+        would age into a stale promise.
+        """
 
     def _notify_result_event(
         self, event_name: str, local_task_id: str, remote_task_id: str
@@ -815,6 +832,10 @@ class RoleServiceClient:
     ) -> RoleTaskRecord:
         snapshot = self.ensure_submitted(local_task_id, request)
         record = self.task_store.load(local_task_id)
+        # Advisory only, and deliberately not persisted: it describes what
+        # comparable tasks cost right now, so a value stored against this task
+        # would age into a claim the service no longer stands behind.
+        self.last_estimated_seconds = snapshot.estimated_seconds
         if snapshot.status in {"queued", "running", "cancel_requested"}:
             if record.status == "running":
                 self.task_store.update_progress(
