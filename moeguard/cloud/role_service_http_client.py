@@ -209,7 +209,9 @@ def role_service_user_message(error: object) -> str:
         if error.code in {"invalid_credit_code", "credit_code_unavailable"}:
             return "兑换码无效、已使用或已停止发放，请检查后重试。"
         if error.code == "credit_campaign_limit_reached":
-            return "当前账号已经领取过本次免费体验次数，不能重复兑换。"
+            # Server counts this per batch (a new batch is a new chance), so the
+            # copy must not suggest the account is done with codes for good.
+            return "这一批兑换码每个账号只能兑换一次，你已兑换过同批次的码。"
         if error.code == "storage_quota_exceeded":
             return "角色素材暂存空间已满，请稍后重试或清理旧任务。"
         if error.status == 429 or error.code == "rate_limited":

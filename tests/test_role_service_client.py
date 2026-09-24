@@ -313,7 +313,7 @@ def test_public_client_rejects_invalid_event_receipts(monkeypatch, response: dic
         ),
         (
             RoleServiceHttpError(409, "credit_campaign_limit_reached", "private server detail"),
-            "已经领取过本次免费体验次数",
+            "这一批兑换码每个账号只能兑换一次",
         ),
         (
             RoleServiceConnectionError("service_timeout"),
