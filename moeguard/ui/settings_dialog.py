@@ -14,9 +14,10 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QUrl, Signal
+from PySide6.QtCore import QSize, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -29,8 +30,10 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QKeySequenceEdit,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QTabWidget,
@@ -44,7 +47,8 @@ from moeguard.pet.role_assets import discover_bundled_roles
 from moeguard.role_pilot import PILOT_NOTICE_TEXT
 from moeguard.roles import InstalledRole, PackageKey, RoleContractError, RoleLibrary
 from moeguard.ui import theme
-from moeguard.utils.paths import resource_path
+from moeguard.utils.paths import base_dir, resource_path
+from moeguard.utils.version import installed_version
 
 logger = logging.getLogger(__name__)
 
@@ -55,15 +59,17 @@ _AFDIAN_PROJECT_URL = "https://ifdian.net/a/moeguard"
 def _make_section(
     title: str, hint: str = "", *, danger: bool = False,
 ) -> tuple[QFrame, QFormLayout]:
-    """构建一个分区卡片（圆角浅色背景 + 标题 + 可选说明 + 表单）。
+    """构建一个共享扁平卡片（标题 + 可选说明 + 表单）。
 
     返回 (section_frame, form_layout)。调用方把控件加入 form_layout，
     再把 section_frame 加入页布局。
     """
     frame = QFrame()
-    frame.setProperty("role", "dangerSection" if danger else "section")
+    frame.setProperty("flatCard", True)
+    if danger:
+        frame.setProperty("role", "dangerSection")
     outer = QVBoxLayout(frame)
-    outer.setContentsMargins(14, 10, 14, 12)
+    outer.setContentsMargins(*theme.CARD_MARGINS)
     outer.setSpacing(6)
 
     title_label = QLabel(title)
@@ -113,6 +119,9 @@ class SettingsDialog(QDialog):
     manage_evidence_requested = Signal()
     custom_role_workbench_requested = Signal()
     role_credit_dialog_requested = Signal()
+    check_update_requested = Signal()
+    mailbox_requested = Signal()
+    connect_service_requested = Signal()
 
     def __init__(
         self,
@@ -122,6 +131,12 @@ class SettingsDialog(QDialog):
         role_library: RoleLibrary | None = None,
         custom_role_workbench_available: bool = False,
         role_credit_dialog_available: bool = False,
+        self_update_available: bool = False,
+        update_status: str = "",
+        mailbox_available: bool = False,
+        support_id: str = "",
+        service_connection_available: bool = False,
+        service_connection_status: str = "",
     ) -> None:
         super().__init__(parent)
         self.setObjectName("settingsDialog")
@@ -133,6 +148,12 @@ class SettingsDialog(QDialog):
         self._role_library = role_library or RoleLibrary()
         self._custom_role_workbench_available = custom_role_workbench_available
         self._role_credit_dialog_available = role_credit_dialog_available
+        self._self_update_available = self_update_available
+        self._update_status = update_status
+        self._mailbox_available = mailbox_available
+        self._support_id = support_id
+        self._service_connection_available = service_connection_available
+        self._service_connection_status = service_connection_status
         self._patrol_consent_withdrawn = False
 
         layout = QVBoxLayout(self)
@@ -146,9 +167,13 @@ class SettingsDialog(QDialog):
         self._build_general_tab()
 
         self.external_links_footer = QWidget()
-        footer_layout = QHBoxLayout(self.external_links_footer)
+        footer_layout = QGridLayout(self.external_links_footer)
         footer_layout.setContentsMargins(0, 0, 0, 0)
         footer_layout.setSpacing(6)
+        links = QWidget(self.external_links_footer)
+        links_layout = QHBoxLayout(links)
+        links_layout.setContentsMargins(0, 0, 0, 0)
+        links_layout.setSpacing(6)
         self.github_link_button = self._external_link_button(
             icon_name="github.svg",
             label="GitHub",
@@ -159,9 +184,8 @@ class SettingsDialog(QDialog):
             label="爱发电",
             url=_AFDIAN_PROJECT_URL,
         )
-        footer_layout.addWidget(self.github_link_button)
-        footer_layout.addWidget(self.afdian_link_button)
-        footer_layout.addStretch(1)
+        links_layout.addWidget(self.github_link_button)
+        links_layout.addWidget(self.afdian_link_button)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("保存")
@@ -170,7 +194,18 @@ class SettingsDialog(QDialog):
         buttons.button(QDialogButtonBox.Cancel).setStyleSheet(theme.button_qss("normal"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        footer_layout.addWidget(buttons)
+        self.version_label = QLabel(f"版本 {installed_version()}")
+        self.version_label.setAlignment(Qt.AlignCenter)
+        self.version_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        # Equal outer columns keep the version at the window's center even
+        # though the links and action buttons have different widths.
+        side_width = max(links.sizeHint().width(), buttons.sizeHint().width())
+        for column in (0, 2):
+            footer_layout.setColumnMinimumWidth(column, side_width)
+            footer_layout.setColumnStretch(column, 1)
+        footer_layout.addWidget(links, 0, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        footer_layout.addWidget(self.version_label, 0, 1, Qt.AlignCenter)
+        footer_layout.addWidget(buttons, 0, 2, Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(self.external_links_footer)
 
     def _external_link_button(
@@ -211,10 +246,11 @@ class SettingsDialog(QDialog):
         page.setContentsMargins(12, 12, 12, 12)
         page.setSpacing(10)
 
+
         # 分区 1：识别与证据参数
         param_frame, form = _make_section(
             "识别与证据",
-            "控制值守时如何识别陌生人、保存多少证据。所有数据仅保存在本机。",
+            "识别与证据数据仅保存在本机。",
         )
 
         self.face_threshold = QDoubleSpinBox()
@@ -298,11 +334,55 @@ class SettingsDialog(QDialog):
         page.setContentsMargins(12, 12, 12, 12)
         page.setSpacing(10)
 
-        # 分区 1：内置角色与已校验的受管自定义角色版本。
-        role_frame, role_form = _make_section(
-            "桌宠外观",
-            "切换内置角色或本机角色库中已通过校验的自定义版本。",
+        about_frame, about_form = _make_section("关于与反馈")
+        self.support_id_edit = QLineEdit(self._support_id)
+        self.support_id_edit.setReadOnly(True)
+        self.support_id_edit.setPlaceholderText("连接服务后显示匿名编号")
+        support_row = QWidget()
+        support_layout = QHBoxLayout(support_row)
+        support_layout.setContentsMargins(0, 0, 0, 0)
+        support_layout.addWidget(self.support_id_edit, 1)
+        self.copy_support_id_button = QPushButton("复制编号")
+        self.copy_support_id_button.setEnabled(bool(self._support_id))
+        self.copy_support_id_button.clicked.connect(
+            lambda: QApplication.clipboard().setText(self._support_id)
         )
+        support_layout.addWidget(self.copy_support_id_button)
+        about_form.addRow("支持编号", support_row)
+        about_actions = QWidget()
+        about_layout = QHBoxLayout(about_actions)
+        about_layout.setContentsMargins(0, 0, 0, 0)
+        self.connect_service_button = QPushButton("重试连接")
+        self.connect_service_button.clicked.connect(self.connect_service_requested)
+        about_layout.addWidget(self.connect_service_button)
+        self.set_service_connection(self._support_id, self._service_connection_status)
+        if self._mailbox_available:
+            self.mailbox_button = QPushButton("信箱…")
+            self.mailbox_button.clicked.connect(self.mailbox_requested)
+            about_layout.addWidget(self.mailbox_button)
+        self.data_folder_button = QPushButton("打开数据目录")
+        self.data_folder_button.clicked.connect(self._open_data_folder)
+        about_layout.addWidget(self.data_folder_button)
+        about_layout.addStretch(1)
+        about_form.addRow(about_actions)
+        page.addWidget(about_frame)
+
+        if self._self_update_available:
+            update_frame, update_form = _make_section("应用更新")
+            self.update_status_label = QLabel(self._update_status)
+            self.update_status_label.setWordWrap(True)
+            self.check_update_button = QPushButton("检查更新")
+            self.check_update_button.setStyleSheet(theme.button_qss("normal"))
+            self.check_update_button.clicked.connect(self.check_update_requested)
+            self.auto_update_check_checkbox = QCheckBox("启动时自动检查更新")
+            self.auto_update_check_checkbox.setChecked(self._config.updates.auto_check_enabled)
+            update_form.addRow(self.update_status_label)
+            update_form.addRow(self.auto_update_check_checkbox)
+            update_form.addRow(self.check_update_button)
+            page.addWidget(update_frame)
+
+        # 分区 1：内置角色与已校验的受管自定义角色版本。
+        role_frame, role_form = _make_section("桌宠外观")
         self.role_selector = QComboBox()
         bundled_roles = discover_bundled_roles()
         available_ids = {role.role_id for role in bundled_roles}
@@ -398,7 +478,7 @@ class SettingsDialog(QDialog):
         # 分区 2：值守触发
         patrol_frame, patrol_form = _make_section(
             "值守触发",
-            "决定什么时候进入值守；自动值守默认关闭，需先完成风险告知和主人注册。",
+            "自动值守默认关闭，须先完成风险告知和主人注册。",
         )
 
         self.away_threshold = QSpinBox()
@@ -425,7 +505,7 @@ class SettingsDialog(QDialog):
         # 实际可用性只在主人注册或用户明确开始值守时验证。
         device_frame, device_form = _make_section(
             "设备与快捷键",
-            "此页面不会探测或打开摄像头；所选设备仅在注册或开始值守时验证。",
+            "摄像头仅在注册或值守时打开。",
         )
 
         self.camera_index = QComboBox()
@@ -445,7 +525,22 @@ class SettingsDialog(QDialog):
         page.addWidget(device_frame)
         page.addStretch(1)
 
-        self._tabs.addTab(tab, "通用")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(tab)
+        self._tabs.addTab(scroll, "通用")
+
+    @Slot(str, str)
+    def set_service_connection(self, account_id: str, status: str) -> None:
+        self._support_id = account_id
+        self.support_id_edit.setText(account_id)
+        self.support_id_edit.setPlaceholderText(status or "连接服务后显示匿名编号")
+        self.copy_support_id_button.setEnabled(bool(account_id))
+        self.connect_service_button.setVisible(
+            self._service_connection_available and not account_id
+        )
+        self.connect_service_button.setEnabled(status != "正在连接服务…")
 
     def _open_custom_role_workbench(self) -> None:
         """Close the stale settings snapshot before opening the role editor."""
@@ -645,6 +740,16 @@ class SettingsDialog(QDialog):
     # 返回所有配置值
     # ------------------------------------------------------------------ #
 
+    def _open_data_folder(self) -> None:
+        try:
+            folder = base_dir()
+            folder.mkdir(parents=True, exist_ok=True)
+            opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+        except OSError:
+            opened = False
+        if not opened:
+            QMessageBox.warning(self, "无法打开目录", "请检查本机数据目录权限后再试。")
+
     def values(self) -> dict:
         """返回所有配置值（用于更新 AppConfig）。
 
@@ -677,6 +782,10 @@ class SettingsDialog(QDialog):
             "auto_patrol_enabled": self.auto_patrol_enabled.isChecked(),
             "patrol_interval_sec": round(self.patrol_interval.value(), 1),
             "device_index": int(self.camera_index.currentData()),
+            "auto_check_enabled": (
+                self.auto_update_check_checkbox.isChecked() if self._self_update_available
+                else self._config.updates.auto_check_enabled
+            ),
             "role_id": role_id,
             "role_package_version": role_package_version,
             "assets_dir": assets_dir,

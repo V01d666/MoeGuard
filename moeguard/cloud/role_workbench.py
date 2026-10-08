@@ -1222,19 +1222,16 @@ class RoleCreditDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(12)
-
-        heading = QLabel("桌宠工坊生成次数")
-        heading.setProperty("role", "title")
-        root.addWidget(heading)
-
-        hint = QLabel(
-            unavailable_message.strip()
-            or "兑换码可以分别包含立绘生成和动作生成次数；"
-            "次数由萌卫生成服务保管，不会写入可修改的本地余额。"
-        )
-        hint.setWordWrap(True)
-        hint.setProperty("role", "hint")
-        root.addWidget(hint)
+        card = QFrame()
+        card.setProperty("flatCard", True)
+        root.addWidget(card)
+        content = QVBoxLayout(card)
+        content.setContentsMargins(*theme.CARD_MARGINS)
+        content.setSpacing(12)
+        if unavailable_message.strip():
+            notice = QLabel(unavailable_message.strip())
+            notice.setWordWrap(True)
+            content.addWidget(notice)
 
         self.support_id_row: QWidget | None = None
         self.support_id_edit: QLineEdit | None = None
@@ -1245,7 +1242,7 @@ class RoleCreditDialog(QDialog):
                 self.support_id_edit,
                 self.copy_support_id_button,
             ) = _support_id_row(self._account_id, self)
-            root.addWidget(self.support_id_row)
+            content.addWidget(self.support_id_row)
 
         balance_row = QHBoxLayout()
         self.balance_label = QLabel(
@@ -1259,7 +1256,7 @@ class RoleCreditDialog(QDialog):
         self.refresh_button.clicked.connect(self._refresh)
         balance_row.addWidget(self.balance_label, 1)
         balance_row.addWidget(self.refresh_button)
-        root.addLayout(balance_row)
+        content.addLayout(balance_row)
 
         redeem_row = QHBoxLayout()
         self.code_edit = QLineEdit()
@@ -1271,12 +1268,12 @@ class RoleCreditDialog(QDialog):
         self.redeem_button.clicked.connect(self._redeem)
         redeem_row.addWidget(self.code_edit, 1)
         redeem_row.addWidget(self.redeem_button)
-        root.addLayout(redeem_row)
+        content.addLayout(redeem_row)
 
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
         self.status_label.setProperty("role", "hint")
-        root.addWidget(self.status_label)
+        content.addWidget(self.status_label)
 
         close_row = QHBoxLayout()
         close_row.addStretch(1)
@@ -1515,28 +1512,19 @@ class RoleWorkbenchDialog(QDialog):
         self.setStyleSheet(theme.dialog_qss("roleWorkbenchDialog"))
 
         root = QVBoxLayout(self)
-        heading = QLabel("把一个角色设定，变成真正会动的 MoeGuard 桌宠")
-        heading.setProperty("role", "title")
-        root.addWidget(heading)
         if not self._generation_available:
-            mode_text = (
-                "离线管理模式：可以查看和管理本地桌宠；"
-                "生成新形象或动作前需要连接生成服务。"
-            )
+            mode_text = "离线管理模式"
         elif service_transport is not None and local_service_executor is None:
-            mode_text = (
-                "在线生成模式：任务经 MoeGuard 服务提交；本机不保存供应商密钥。"
-            )
+            mode_text = "在线生成模式"
         elif local_service_executor is not None:
-            mode_text = "服务联调模式：仅使用本地 fake，不会调用模型或产生费用。"
+            mode_text = "服务联调模式：免费演示"
         elif backend.is_fake:
-            mode_text = "离线演示模式：不会调用模型，也不会产生费用。"
+            mode_text = "离线演示模式：免费演示"
         else:
-            mode_text = (
-                "内部直连模式：密钥只从系统环境读取；"
-                "每次付费动作前都会再次确认。"
-            )
+            mode_text = "内部直连模式：付费前需确认"
         self.mode_hint = QLabel(mode_text)
+        if service_transport is not None and local_service_executor is None:
+            self.mode_hint.setToolTip("由萌卫服务处理，本机不保存供应商密钥。")
         self.mode_hint.setWordWrap(True)
         self.mode_hint.setProperty("role", "hint")
         root.addWidget(self.mode_hint)
@@ -1546,14 +1534,9 @@ class RoleWorkbenchDialog(QDialog):
         if not self._generation_available:
             self.service_bar = QFrame()
             self.service_bar.setObjectName("roleServiceNotice")
-            self.service_bar.setStyleSheet(
-                "QFrame#roleServiceNotice {"
-                f"background: {theme.SECTION_BG}; border: 1px solid {theme.BORDER_STRONG}; "
-                "border-radius: 9px;"
-                "}"
-            )
+            self.service_bar.setProperty("flatCard", True)
             service_layout = QHBoxLayout(self.service_bar)
-            service_layout.setContentsMargins(12, 8, 10, 8)
+            service_layout.setContentsMargins(*theme.CARD_MARGINS)
             service_layout.setSpacing(10)
             service_notice = QLabel(self._generation_unavailable_message)
             service_notice.setWordWrap(True)
@@ -1648,25 +1631,21 @@ class RoleWorkbenchDialog(QDialog):
         left.setObjectName("roleInputPanel")
         left.setMinimumWidth(450)
         left.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        left.setStyleSheet(
-            "QFrame#roleInputPanel {"
-            f"background: {theme.PANEL_BG}; border: 1px solid {theme.BORDER}; "
-            "border-radius: 10px;"
-            "}"
-        )
         left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(14, 14, 14, 14)
+        left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(12)
         left_layout.setAlignment(Qt.AlignTop)
-        self.create_stage_panel = QWidget()
+        self.create_stage_panel = QFrame()
+        self.create_stage_panel.setProperty("flatCard", True)
         create_stage_layout = QVBoxLayout(self.create_stage_panel)
-        create_stage_layout.setContentsMargins(0, 0, 0, 0)
+        create_stage_layout.setContentsMargins(*theme.CARD_MARGINS)
         create_stage_layout.setSpacing(12)
         left_layout.addWidget(self.create_stage_panel)
-        right = QWidget()
+        right = QFrame()
+        right.setProperty("flatCard", True)
         self.right_panel = right
         right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setContentsMargins(*theme.CARD_MARGINS)
         self.input_scroll = QScrollArea()
         self.input_scroll.setObjectName("roleInputScroll")
         self.input_scroll.setWidgetResizable(True)
@@ -1769,14 +1748,9 @@ class RoleWorkbenchDialog(QDialog):
 
         self.home_panel = QFrame()
         self.home_panel.setObjectName("roleHomePanel")
-        self.home_panel.setStyleSheet(
-            "QFrame#roleHomePanel {"
-            f"background: {theme.PANEL_BG}; border: 1px solid {theme.BORDER}; "
-            "border-radius: 12px;"
-            "}"
-        )
+        self.home_panel.setProperty("flatCard", True)
         home_layout = QVBoxLayout(self.home_panel)
-        home_layout.setContentsMargins(24, 24, 24, 24)
+        home_layout.setContentsMargins(*theme.CARD_MARGINS)
         home_layout.addStretch(1)
         home_content = QWidget()
         home_content.setMaximumWidth(820)
@@ -1787,12 +1761,6 @@ class RoleWorkbenchDialog(QDialog):
         home_title = QLabel("桌宠工坊")
         home_title.setProperty("role", "title")
         home_content_layout.addWidget(home_title)
-        home_hint = QLabel(
-            "创建一个新桌宠，或选择已经安装的角色继续补动作、替换动作和修改形象。"
-        )
-        home_hint.setWordWrap(True)
-        home_hint.setProperty("role", "hint")
-        home_content_layout.addWidget(home_hint)
         self.create_new_role_button = QPushButton("创建新角色")
         self.create_new_role_button.setMinimumHeight(44)
         self.create_new_role_button.setStyleSheet(theme.button_qss("accent"))
@@ -1821,10 +1789,6 @@ class RoleWorkbenchDialog(QDialog):
         common_form.addRow("角色名称", self.display_name)
         create_stage_layout.addLayout(common_form)
         self._refresh_editable_roles()
-        concept_hint = QLabel("名称只用于标识这个角色，不会影响立绘长相。")
-        concept_hint.setWordWrap(True)
-        concept_hint.setProperty("role", "hint")
-        create_stage_layout.addWidget(concept_hint)
 
         self.input_tabs = QTabWidget()
         self.input_tabs.setDocumentMode(True)
@@ -1850,12 +1814,7 @@ class RoleWorkbenchDialog(QDialog):
             if value == "feminine":
                 option.setChecked(True)
             if value == "neutral":
-                neutral_hint = QLabel("动物 / 机械体等")
-                neutral_hint.setProperty("role", "hint")
-                neutral_hint.setToolTip(
-                    "用于生成动物、机械体等非人类性别外观的角色"
-                )
-                presentation_layout.addWidget(neutral_hint)
+                option.setToolTip("动物、机械体等非人类外观")
         presentation_layout.addStretch(1)
         text_form.addRow("性别展示", presentation_row)
 
@@ -1944,7 +1903,6 @@ class RoleWorkbenchDialog(QDialog):
             advanced_form.addRow(label, editor)
         self.avoid = QLineEdit()
         self.avoid.setMaxLength(100)
-        self.avoid.setPlaceholderText("不希望出现在身份立绘中的内容")
         self.avoid.textChanged.connect(self._update_detail_budget)
         advanced_form.addRow("避免出现", self.avoid)
         self.detail_budget = QLabel(f"描述长度 0/{_TEXT_DETAIL_LIMIT}")
@@ -1965,17 +1923,23 @@ class RoleWorkbenchDialog(QDialog):
         image_row.addWidget(self.image_path, 1)
         image_row.addWidget(browse)
         image_layout.addLayout(image_row)
-        image_hint = QLabel(
-            "建议上传单人、全身、静态姿势、头脚完整且背景简单的图片。"
-            "尽量避免多人、复杂场景、大幅动作、遮挡和裁切。"
+        self.image_hint = QLabel(
+            "单角色静态全身图，头脚完整、无遮挡；暂不支持多视图或三视图。\n"
+            "用简单背景，复杂场景或截图可能闪烁、漂浮。"
         )
-        image_hint.setWordWrap(True)
-        image_hint.setProperty("role", "hint")
-        image_layout.addWidget(image_hint)
+        self.image_hint.setWordWrap(True)
+        self.image_hint.setStyleSheet(f"color: {theme.DANGER}; font-weight: 600;")
+        image_warning = QFrame()
+        image_warning.setProperty("flatCard", True)
+        image_warning.setProperty("role", "dangerSection")
+        warning_layout = QVBoxLayout(image_warning)
+        warning_layout.setContentsMargins(*theme.CARD_MARGINS)
+        warning_layout.addWidget(self.image_hint)
+        image_layout.addWidget(image_warning)
         self.must_preserve = QLineEdit()
         self.must_preserve.setMaxLength(60)
         self.must_preserve.setPlaceholderText(
-            "必须保留或想微调的特征（可选，例如右侧马尾和蓝色蝴蝶结）"
+            "保留或微调的特征（可选，如右侧马尾、蓝色蝴蝶结）"
         )
         image_layout.addWidget(self.must_preserve)
 
@@ -1985,10 +1949,11 @@ class RoleWorkbenchDialog(QDialog):
         create_stage_layout.addWidget(self.input_tabs)
         create_stage_layout.addStretch(1)
 
-        self.action_stage_panel = QWidget()
+        self.action_stage_panel = QFrame()
+        self.action_stage_panel.setProperty("flatCard", True)
         self.action_stage_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         action_stage_layout = QVBoxLayout(self.action_stage_panel)
-        action_stage_layout.setContentsMargins(0, 0, 0, 0)
+        action_stage_layout.setContentsMargins(*theme.CARD_MARGINS)
         action_stage_layout.setSpacing(12)
         left_layout.addWidget(self.action_stage_panel)
         action_stage_nav = QHBoxLayout()
@@ -2009,8 +1974,7 @@ class RoleWorkbenchDialog(QDialog):
         self.action_heading.setProperty("role", "sectionTitle")
         action_stage_layout.addWidget(self.action_heading)
         self.action_fallback_hint = QLabel(
-            "待机是唯一必需动作。先生成它即可安装使用；"
-            "点击、拖动和边缘探头等互动可以现在添加，也可安装后再补。"
+            "待机是唯一必需动作，其他动作可安装后再补。"
         )
         self.action_fallback_hint.setWordWrap(True)
         self.action_fallback_hint.setProperty("role", "hint")
@@ -2109,7 +2073,7 @@ class RoleWorkbenchDialog(QDialog):
         self._client_event_timer = QTimer(self)
         self._client_event_timer.setInterval(30_000)
         self._client_event_timer.timeout.connect(self._client_event_tick)
-        self.status = QLabel("先填写角色设定，然后准备身份候选。")
+        self.status = QLabel("")
         self.status.setWordWrap(True)
         left_layout.addWidget(self.activity_indicator)
         left_layout.addWidget(self.status)
@@ -2144,7 +2108,7 @@ class RoleWorkbenchDialog(QDialog):
         self.action_selector.itemSelectionChanged.connect(
             self._update_regenerate_enabled
         )
-        self.preview = QLabel("动作生成后可在这里连续预览")
+        self.preview = QLabel("暂无动作预览")
         self.preview.setAlignment(Qt.AlignCenter)
         self.preview.setMinimumSize(320, 240)
         self.preview.setStyleSheet("border: 1px solid #d9d9d9; border-radius: 8px;")
@@ -2164,16 +2128,13 @@ class RoleWorkbenchDialog(QDialog):
         preview_column.addLayout(revision_row)
         right_layout.addLayout(preview_column, 1)
 
-        self.completion_panel = QWidget()
+        self.completion_panel = QFrame()
+        self.completion_panel.setProperty("flatCard", True)
         completion_layout = QVBoxLayout(self.completion_panel)
-        completion_layout.setContentsMargins(0, 0, 0, 0)
+        completion_layout.setContentsMargins(*theme.CARD_MARGINS)
         completion_layout.setSpacing(8)
         bottom = QHBoxLayout()
         bottom.setSpacing(10)
-        self.save_hint = QLabel("完成待机动作后，即可导出角色包或安装到萌卫。")
-        self.save_hint.setProperty("role", "hint")
-        self.save_hint.setAlignment(Qt.AlignRight)
-        completion_layout.addWidget(self.save_hint)
 
         self.save_button = QPushButton("保存并导出至…")
         self.save_button.setEnabled(False)
@@ -2534,8 +2495,7 @@ class RoleWorkbenchDialog(QDialog):
         answer = QMessageBox.question(
             self,
             "返回修改角色设定？",
-            "当前身份候选会暂时保留；修改设定后必须重新生成候选，"
-            "不会沿用与新设定不一致的形象。是否返回？",
+            "返回后保留候选；修改设定后需重新生成。是否返回？",
             QMessageBox.Yes | QMessageBox.Cancel,
             QMessageBox.Cancel,
         )
@@ -2939,7 +2899,7 @@ class RoleWorkbenchDialog(QDialog):
         self._set_ui_stage(1)
         self._update_generation_selection()
         self._update_action_emphasis()
-        self.status.setText("先填写角色设定，然后准备身份候选。")
+        self.status.setText("")
 
     def request(self) -> WorkbenchRequest:
         mode = "text" if self.input_tabs.currentIndex() == 0 else "image"
@@ -3061,8 +3021,7 @@ class RoleWorkbenchDialog(QDialog):
             "勾选要新增或替换的动作；未勾选动作原样保留。"
             if editing
             else (
-                "待机是唯一必需动作。先生成它即可安装使用；"
-                "点击、拖动和边缘探头等互动可以现在添加，也可安装后再补。"
+                "待机是唯一必需动作，其他动作可安装后再补。"
             )
         )
         self.action_checks["idle"].setVisible(editing)
@@ -3947,14 +3906,11 @@ class RoleWorkbenchDialog(QDialog):
         )
         package_ready = self._package_result is not None
         if package_ready:
-            self.save_hint.setText("角色包已就绪：可以导出，也可以直接保存并安装。")
             self.save_button.setToolTip(
-                "将完整角色包导出到你选择的位置；"
-                "之后可在「设置 → 导入角色…」装回来"
+                "导出角色包，之后可在「设置 → 导入角色…」装回来"
             )
             self.install_button.setToolTip("保存到角色库并立即切换为当前桌宠")
         else:
-            self.save_hint.setText("完成待机动作后，即可导出角色包或安装到萌卫。")
             disabled_reason = "请先选择身份候选并生成至少一个待机动作"
             self.save_button.setToolTip(disabled_reason)
             self.install_button.setToolTip(disabled_reason)
@@ -4149,8 +4105,7 @@ class RoleWorkbenchDialog(QDialog):
         else:
             ready_text = "身份候选已生成"
         self.status.setText(
-            f"{ready_text}{suffix}。下一步：确认选中的形象，"
-            "然后生成待机动作；完成后即可保存或安装。"
+            f"{ready_text}{suffix}；下一步：选择形象并生成待机动作。"
         )
         duration_ms = max(
             0,
@@ -4276,7 +4231,7 @@ class RoleWorkbenchDialog(QDialog):
             QMessageBox.warning(
                 self,
                 "角色设定已改变",
-                "身份候选生成后设定发生了变化。请重新准备候选，避免动作与身份不一致。",
+                "设定已变更，请重新生成候选后再做动作。",
             )
             return
         actions = self._selected_actions()
@@ -4289,11 +4244,9 @@ class RoleWorkbenchDialog(QDialog):
             answer = QMessageBox.warning(
                 self,
                 f"确认生成所选 {len(actions)} 个动作？",
-                f"将生成 {len(actions)} 个桌宠动作，使用 {len(actions)} 次"
-                "动作生成次数；只有待机是必选项。\n"
+                f"生成 {len(actions)} 个动作，使用 {len(actions)} 次动作生成次数。\n"
                 f"{cost_line}"
-                "任务可能持续数分钟；中断后必须恢复已有 task，不能直接重提。\n\n"
-                "是否继续？",
+                "中断后请点“恢复失败任务”，不要重新生成。",
                 QMessageBox.Yes | QMessageBox.Cancel,
                 QMessageBox.Cancel,
             )
@@ -4369,7 +4322,7 @@ class RoleWorkbenchDialog(QDialog):
             QMessageBox.warning(
                 self,
                 "角色设定已改变",
-                "身份候选生成后设定发生了变化。请重新准备候选，避免动作与身份不一致。",
+                "设定已变更，请重新生成候选后再做动作。",
             )
             return
         actions = self._selected_actions()
@@ -4499,27 +4452,24 @@ class RoleWorkbenchDialog(QDialog):
                 answer = QMessageBox.warning(
                     self,
                     f"确认确定性修复并创建 v{next_version}？",
-                    f"将使用 {len(actions)} 次动作生成次数，并用当前已接受的"
-                    f"「{_ACTION_LABELS[directional_source]}」"
-                    f"作为基准，通过双镜像共轭生成"
-                    f"「{_ACTION_LABELS[target_action]}」。{cost_line}\n"
-                    "旧版本会继续保留；新方向仍需逐项预览。",
+                    f"使用 {len(actions)} 次动作生成次数，以已确认的"
+                    f"「{_ACTION_LABELS[directional_source]}」修复"
+                    f"「{_ACTION_LABELS[target_action]}」{cost_line}；"
+                    "保留旧版本，新方向仍需预览。",
                     QMessageBox.Yes | QMessageBox.Cancel,
                     QMessageBox.Cancel,
                 )
             else:
                 direction_note = (
-                    "\n当前没有已确认的反向动作，本次将直接生成所选方向；"
-                    "结果仍需人工预览，之后另一侧可使用镜像共轭生成。"
+                    "\n无另一侧基准，将直接生成并需预览确认。"
                     if directional_targets
                     else ""
                 )
                 answer = QMessageBox.warning(
                     self,
                     f"确认创建 v{next_version}？",
-                    f"将新增或替换 {len(actions)} 个动作，使用 {len(actions)} 次"
-                    "动作生成次数；未勾选动作保持不变。"
-                    f"{cost_line}{direction_note}\n旧版本会继续保留，可随时回滚。",
+                    f"使用 {len(actions)} 次动作生成次数，更新所选动作{cost_line}；"
+                    f"其他动作不变，旧版本可回滚。{direction_note}",
                     QMessageBox.Yes | QMessageBox.Cancel,
                     QMessageBox.Cancel,
                 )
@@ -4749,12 +4699,9 @@ class RoleWorkbenchDialog(QDialog):
                     answer = QMessageBox.warning(
                         self,
                         "确认确定性修复方向？",
-                        "将使用 1 次动作生成次数，并用当前"
-                        f"「{_ACTION_LABELS[source_action]}」作为方向基准，"
-                        f"通过双镜像共轭生成「{_ACTION_LABELS[target_action]}」"
-                        f"{cost_line}。\n\n"
-                        f"请确认当前「{_ACTION_LABELS[source_action]}」的方向和角色特征"
-                        "可以接受。新结果仍需预览确认。",
+                        f"确认「{_ACTION_LABELS[source_action]}」的方向和特征后，"
+                        "使用 1 次动作生成次数"
+                        f"修复「{_ACTION_LABELS[target_action]}」{cost_line}；新结果仍需预览。",
                         QMessageBox.Yes | QMessageBox.Cancel,
                         QMessageBox.Cancel,
                     )
@@ -4764,10 +4711,8 @@ class RoleWorkbenchDialog(QDialog):
                     answer = QMessageBox.warning(
                         self,
                         "确认直接生成方向动作？",
-                        "当前没有已确认的反向动作，将直接生成"
-                        f"「{_ACTION_LABELS[target_action]}」并使用 1 次动作生成次数"
-                        f"{cost_line}。\n\n结果仍需人工预览；接受后，另一侧可使用"
-                        "镜像共轭生成。",
+                        f"无已确认的反向动作，使用 1 次动作生成次数直接生成"
+                        f"「{_ACTION_LABELS[target_action]}」{cost_line}；确认结果后可修复另一侧。",
                         QMessageBox.Yes | QMessageBox.Cancel,
                         QMessageBox.Cancel,
                     )
@@ -4914,7 +4859,7 @@ class RoleWorkbenchDialog(QDialog):
         dialog = QMessageBox(self)
         dialog.setIcon(QMessageBox.Warning)
         dialog.setWindowTitle(f"确认{action}")
-        dialog.setText("请确认输入内容不侵犯他人权益，并且生成结果符合你的预期。")
+        dialog.setText("请确认输入未侵权，结果符合预期。")
         dialog.setInformativeText(f"继续后将{action}。")
         dialog.setStandardButtons(QMessageBox.Yes | QMessageBox.Cancel)
         dialog.setDefaultButton(QMessageBox.Cancel)
@@ -5116,16 +5061,13 @@ class RoleWorkbenchDialog(QDialog):
             QMessageBox.warning(
                 self,
                 "网络中断，任务仍在云端继续",
-                f"{message}\n\n"
-                "与云端的连接中断了，但任务没有取消，也不会重复计费。\n"
-                "请稍候点击“恢复失败任务”继续等待同一个任务，不要重新生成。",
+                f"{message}\n\n云端任务仍在运行，请点“恢复失败任务”，不要重新生成，不会重复计费。",
             )
             return
         QMessageBox.critical(
             self,
             "桌宠工坊任务未完成",
-            f"{message}\n\n任务状态和已完成的远端结果会保留；"
-            "请点击“恢复失败任务”，不要重新生成。",
+            f"{message}\n\n任务和结果已保留，请点击“恢复失败任务”。",
         )
 
     def _on_preflight_failure(self, error: _ServiceLinkUnavailable) -> None:
@@ -5152,10 +5094,7 @@ class RoleWorkbenchDialog(QDialog):
         QMessageBox.warning(
             self,
             "无法连接生成服务",
-            f"{detail}\n\n"
-            "本次没有提交任务，也没有扣除生成次数。\n"
-            "如果正在使用 VPN 或代理，请尝试关闭后重试："
-            "节点停止转发时，连接会卡住而不是立刻报错。",
+            f"{detail}\n\n未提交任务，未扣除次数。\n如使用 VPN 或代理，可关闭后重试。",
         )
 
     def _on_operation_success(
@@ -5221,7 +5160,7 @@ class RoleWorkbenchDialog(QDialog):
         ):
             return
         self.resume_task_button.setEnabled(False)
-        self.status.setText("正在沿用同一离线任务恢复；不会创建新的计费请求…")
+        self.status.setText("正在恢复原任务，不会重新计费…")
         self._start_worker(operation, success)
 
     def _request_task_cancel(self) -> None:
@@ -5244,8 +5183,7 @@ class RoleWorkbenchDialog(QDialog):
         self._worker.requestInterruption()
         self.cancel_task_button.setEnabled(False)
         self.status.setText(
-            "已请求取消；将在下一个安全进度点停止。"
-            "若远程任务已经提交，现有 task 与原始结果会保留，不会自动重提。"
+            "已请求取消，将在安全进度点停止；已提交的任务和结果保留，不会自动重提。"
         )
 
     def _on_cancelled(self) -> None:
@@ -5280,8 +5218,7 @@ class RoleWorkbenchDialog(QDialog):
         self.install_button.setEnabled(False)
         self._set_ui_stage(1)
         self.status.setText(
-            "当前操作已在安全点取消；没有产生可保存或可安装的新结果。"
-            "已提交的远程 task 若存在，必须走恢复流程，不能直接重提。"
+            "已在安全点取消，没有新结果；已提交的任务请恢复，不要重新生成。"
         )
 
     def _worker_finished(self) -> None:
@@ -5297,12 +5234,17 @@ class RoleWorkbenchDialog(QDialog):
         if refresh_account:
             self._refresh_account_summary(quiet=True)
 
+    def has_running_task(self) -> bool:
+        """True while a service call is in flight; an app restart must wait."""
+
+        return self._worker is not None and self._worker.isRunning()
+
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         if self._worker is not None and self._worker.isRunning():
             QMessageBox.information(
                 self,
                 "任务仍在运行",
-                "为避免丢失远程 task，请等待当前步骤完成后再关闭工作台。",
+                "请等当前步骤完成后再关闭，以保留任务。",
             )
             event.ignore()
             return

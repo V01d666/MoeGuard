@@ -33,6 +33,76 @@ def _token() -> str:
     return "mgr_" + "a" * 24 + "_" + "B" * 43
 
 
+@pytest.mark.parametrize("operation", ["account", "redeem", "enroll", "purchase", "event", "asset"])
+@pytest.mark.parametrize("mutation", ["extra", "missing", "invalid"])
+def test_response_extensions_keep_required_fields_and_types(
+    operation, mutation, tmp_path, monkeypatch
+):
+    balances = dict.fromkeys(("available_units", "reserved_units", "consumed_units",
+                             "available_t2i_units", "available_i2v_units",
+                             "available_flexible_units"), 0)
+    data = {
+        "account": balances.copy(), "redeem": balances.copy(),
+        "enroll": {"account_id": "test-account", "bearer_token": _token(), "expires_at": 1},
+        "purchase": {"custom_order_id": "a" * 16, "expires_at": 1},
+        "event": {"accepted_count": 1, "duplicate_count": 0, "received_at_ms": 1},
+        "asset": {"sha256": "a" * 64, "media_type": "image/png", "purpose": "input_image",
+                  "size_bytes": 1, "expires_at": 1},
+    }[operation]
+    numeric_key = "size_bytes" if operation == "asset" else (
+        "expires_at" if operation in {"enroll", "purchase"} else (
+            "received_at_ms" if operation == "event" else "available_units"
+        )
+    )
+    if mutation == "extra":
+        data["future_metadata"] = {"revision": 2}
+    elif mutation == "missing":
+        data.pop(numeric_key)
+    else:
+        data[numeric_key] = True
+    payload = json.dumps({"schema_version": 1, "data": data, "future_envelope": 2}).encode()
+    monkeypatch.setattr(HttpRoleServiceTransport, "_request", lambda *_a, **_k: (payload, {}))
+    transport = HttpRoleServiceTransport("https://roles.example", _token())
+    source = tmp_path / "asset.png"
+    source.write_bytes(b"x")
+    event = ClientEvent("a", "client_error_shown", 1, 1, "b", "c", "", "0.2.0",
+                        (("error_code", "network_unavailable"),))
+    actions = {
+        "account": transport.account_summary,
+        "redeem": lambda: transport.redeem_credit_code("test-code"),
+        "enroll": lambda: transport.enroll("https://roles.example", "test", "test"),
+        "purchase": transport.create_purchase_intent,
+        "event": lambda: transport.submit_client_events((event,)),
+        "asset": lambda: transport.upload_asset(source, purpose="input_image",
+                                                media_type="image/png", expires_at=1),
+    }
+    if mutation == "extra":
+        assert actions[operation]() is not None
+    else:
+        with pytest.raises(ValueError):
+            actions[operation]()
+
+
+def test_response_envelope_extensions_do_not_allow_missing_or_unsupported_schema():
+    for raw in ({"data": {}}, {"schema_version": 1}, {"schema_version": 2, "data": {}}):
+        with pytest.raises(ValueError):
+            HttpRoleServiceTransport._data(json.dumps(raw).encode())
+
+
+def test_server_asset_request_and_runtime_contract_remain_strict():
+    from moeguard.cloud.role_service import ClientRuntimeInfo, ServiceAssetRef
+
+    raw = ServiceAssetRef("a" * 64, "image/png", "input_image", 1, 1).to_dict()
+    raw["future_field"] = 2
+    assert ServiceAssetRef.from_dict(raw, allow_extra_fields=True).size_bytes == 1
+    with pytest.raises(ValueError):
+        ServiceAssetRef.from_dict(raw)
+    runtime = ClientRuntimeInfo().to_dict()
+    runtime["future_field"] = 2
+    with pytest.raises(ValueError):
+        ClientRuntimeInfo.from_dict(runtime)
+
+
 def test_public_role_service_client_is_disabled_by_default() -> None:
     assert role_service_transport_from_environment({}) is None
     assert role_service_origin_from_environment({}) is None

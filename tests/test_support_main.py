@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -26,6 +28,162 @@ from moeguard.cloud.role_workbench import (
 )
 from moeguard.role_main import configure_role_workbench
 from moeguard.roles import RoleLibrary
+
+
+def _wait_connection(app, qt_app):
+    deadline = time.monotonic() + 5
+    while app._service_connection.busy and time.monotonic() < deadline:
+        qt_app.processEvents()
+        time.sleep(.005)
+    qt_app.processEvents()
+    assert not app._service_connection.busy
+
+
+def _automatic_app(tmp_path, monkeypatch, enroll):
+    from moeguard.config import AppConfig
+
+    monkeypatch.setattr(HttpRoleServiceTransport, "enroll", enroll)
+    library = RoleLibrary(tmp_path / "roles")
+    monkeypatch.setattr("moeguard.ui.settings_dialog.RoleLibrary", lambda: library)
+    sessions = RoleServiceSessionStore(tmp_path / "session.json", _TestProtector())
+    enrollments = RoleServiceEnrollmentStore(tmp_path / "enrollment.json", _TestProtector())
+    app = MoeGuardApp()
+    app._config = AppConfig()
+    configure_role_workbench(
+        app, environ={}, storage_root=tmp_path / "workbench", role_library=library,
+        session_store=sessions, enrollment_store=enrollments,
+        service_origin="https://roles.example", clock=lambda: 1_900_000_000,
+    )
+    return app, sessions, enrollments
+
+
+def _automatic_enrollment():
+    return RoleServiceEnrollment("client-" + "a" * 32,
+                                 "mgr_" + "b" * 24 + "_" + "C" * 43, 2_000_000_000)
+
+
+def test_startup_connects_off_ui_thread_updates_open_settings_and_reuses_session(
+    tmp_path, qt_app, monkeypatch,
+):
+    calls = []
+    release = threading.Event()
+    gui_thread = threading.get_ident()
+
+    def enroll(*args):
+        calls.append((threading.get_ident(), args))
+        assert release.wait(5)
+        return _automatic_enrollment()
+
+    app, sessions, _ = _automatic_app(tmp_path, monkeypatch, enroll)
+    delivered_on = []
+    app._service_connection.changed.connect(
+        lambda *_: delivered_on.append(threading.get_ident())
+    )
+    app.ready.emit()
+    app._service_connection.connect_now()  # Coalesced with startup.
+    app._on_open_settings()
+    dialog = app._settings_dialog
+    assert app._service_connection.busy
+    assert not dialog.connect_service_button.isEnabled()
+    assert dialog.support_id_edit.text() == ""
+    release.set()
+    _wait_connection(app, qt_app)
+    assert len(calls) == 1 and calls[0][0] != gui_thread
+    assert all(thread == gui_thread for thread in delivered_on)
+    assert dialog.support_id_edit.text() == _automatic_enrollment().account_id
+    assert dialog.copy_support_id_button.isEnabled()
+    assert dialog.connect_service_button.isHidden()
+    assert sessions.load() is not None
+    dialog.reject()
+    qt_app.processEvents()
+
+    restarted, _, _ = _automatic_app(tmp_path, monkeypatch, enroll)
+    restarted.ready.emit()
+    _wait_connection(restarted, qt_app)
+    assert len(calls) == 1
+    assert restarted._support_id_provider() == _automatic_enrollment().account_id
+
+
+def test_startup_failure_is_sanitized_and_settings_retry_keeps_identity(
+    tmp_path, qt_app, monkeypatch,
+):
+    calls = []
+
+    def enroll(*args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise TimeoutError("private request detail")
+        return _automatic_enrollment()
+
+    app, _, _ = _automatic_app(tmp_path, monkeypatch, enroll)
+    app.ready.emit()
+    _wait_connection(app, qt_app)
+    app._on_open_settings()
+    dialog = app._settings_dialog
+    assert "private" not in dialog.support_id_edit.placeholderText()
+    assert dialog.connect_service_button.isEnabled()
+    dialog.connect_service_button.click()
+    _wait_connection(app, qt_app)
+    assert len(calls) == 2 and calls[0] == calls[1]
+    assert dialog.support_id_edit.text() == _automatic_enrollment().account_id
+    dialog.reject()
+    qt_app.processEvents()
+
+
+def test_expired_session_recovers_existing_identity_and_closed_settings_are_safe(
+    tmp_path, qt_app, monkeypatch,
+):
+    calls = []
+
+    def enroll(*args):
+        calls.append(args)
+        return _automatic_enrollment()
+
+    app, sessions, _ = _automatic_app(tmp_path, monkeypatch, enroll)
+    app.ready.emit()
+    _wait_connection(app, qt_app)
+    previous = sessions.load()
+    from dataclasses import replace
+
+    sessions.save(replace(previous, expires_at=1_800_000_000))
+    restarted, _, _ = _automatic_app(tmp_path, monkeypatch, enroll)
+    restarted._on_open_settings()
+    restarted._settings_dialog.reject()
+    qt_app.processEvents()
+    restarted.ready.emit()
+    _wait_connection(restarted, qt_app)
+    assert len(calls) == 2 and calls[0] == calls[1]
+    assert restarted._service_connection.account_id == previous.account_id
+
+
+def test_explicit_disconnect_stays_disconnected_until_manual_reconnect(
+    tmp_path, qt_app, monkeypatch,
+):
+    calls = []
+
+    def enroll(*args):
+        calls.append(args)
+        return _automatic_enrollment()
+
+    app, _, _ = _automatic_app(tmp_path, monkeypatch, enroll)
+    app.ready.emit()
+    _wait_connection(app, qt_app)
+    old_session = app._service_connection.manager.current_session()
+    app._service_connection.manager.unbind()
+    app._service_connection.disconnected()
+    # Late queued completion must not undo disconnect.
+    app._service_connection._complete(old_session)
+    assert app._service_connection.account_id == ""
+    assert app._service_connection.manager.bind_automatically("https://roles.example") is None
+    assert len(calls) == 1
+    restarted, sessions, _ = _automatic_app(tmp_path, monkeypatch, enroll)
+    restarted.ready.emit()
+    assert not restarted._service_connection.busy
+    assert len(calls) == 1 and sessions.load() is None
+    restarted._service_connection.connect_now()
+    _wait_connection(restarted, qt_app)
+    assert len(calls) == 2
+    assert not restarted._service_connection.manager.auto_connect_disabled_path.exists()
 
 
 class _TestProtector:

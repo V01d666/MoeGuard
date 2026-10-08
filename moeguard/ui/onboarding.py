@@ -390,6 +390,12 @@ class OnboardingBubble(QWidget):
         waiting = self._add_button("正在注册…", lambda: None)
         waiting.setEnabled(False)
 
+    def has_camera_session(self) -> bool:
+        """Keep update restarts out of preview, capture and its completion page."""
+        return self.isVisible() and (
+            self._step == 3 or self._registration_in_progress or self._owner_registered
+        )
+
     def registration_result(self, success: bool, message: str = "") -> None:
         """仅当后台注册和持久化均成功后，才允许进入完成页。"""
         self._registration_in_progress = False

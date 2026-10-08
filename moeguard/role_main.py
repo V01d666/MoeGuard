@@ -3,39 +3,57 @@
 from __future__ import annotations
 
 import sys
-import time
-from collections.abc import Callable, Mapping
-from pathlib import Path
 
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QDialog, QMessageBox
+# Velopack's install/update hooks start this executable with hook arguments and
+# expect it to exit from inside run(); nothing heavier may load before that.
+# A no-op for source runs and for builds without the velopack wheel.
+if __name__ == "__main__":
+    from moeguard.updater import run_velopack_startup
 
-from moeguard import __version__
-from moeguard.app import MoeGuardApp, run
-from moeguard.cloud.role_service_binding import (
+    run_velopack_startup()
+
+import time  # noqa: E402
+from collections.abc import Callable, Mapping  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from PySide6.QtCore import QTimer  # noqa: E402
+from PySide6.QtWidgets import QDialog, QMessageBox  # noqa: E402
+
+from moeguard import __version__  # noqa: E402
+from moeguard.app import MoeGuardApp, run  # noqa: E402
+from moeguard.cloud.role_service_binding import (  # noqa: E402
     RoleServiceBindingManager,
     RoleServiceEnrollmentStore,
 )
-from moeguard.cloud.role_service_binding_dialog import RoleServiceBindingDialog
-from moeguard.cloud.role_service_bootstrap import (
+from moeguard.cloud.role_service_binding_dialog import (  # noqa: E402
+    AutomaticServiceConnection,
+    RoleServiceBindingDialog,
+)
+from moeguard.cloud.role_service_bootstrap import (  # noqa: E402
     https_role_service_origin,
     role_service_origin_from_environment,
     role_service_origin_from_file,
     role_service_transport_from_environment,
 )
-from moeguard.cloud.role_service_client_events import (
+from moeguard.cloud.role_service_client_events import (  # noqa: E402
     ClientEventOutboxStore,
     PreviewClientEventReporter,
     PreviewClientEventTracker,
 )
-from moeguard.cloud.role_service_session import RoleServiceSessionStore
-from moeguard.cloud.role_workbench import (
+from moeguard.cloud.role_service_http_client import HttpRoleServiceTransport  # noqa: E402
+from moeguard.cloud.role_service_mailbox_client import (  # noqa: E402
+    MailboxReadStore,
+    mailbox_diagnostics,
+)
+from moeguard.cloud.role_service_mailbox_dialog import MailboxDialog  # noqa: E402
+from moeguard.cloud.role_service_session import RoleServiceSessionStore  # noqa: E402
+from moeguard.cloud.role_workbench import (  # noqa: E402
     RemoteRoleWorkbenchBackend,
     RoleCreditDialog,
     RoleWorkbenchDialog,
 )
-from moeguard.roles import PackageKey, RoleLibrary
-from moeguard.utils.paths import ROLE_WORKBENCH_DIR, resource_path
+from moeguard.roles import PackageKey, RoleLibrary  # noqa: E402
+from moeguard.utils.paths import ROLE_WORKBENCH_DIR, resource_path  # noqa: E402
 
 
 def configure_role_workbench(
@@ -81,6 +99,14 @@ def configure_role_workbench(
     except ValueError:
         configured_origin = None
 
+    connection = (
+        AutomaticServiceConnection(binding, configured_origin, app)
+        if configured_origin is not None else None
+    )
+    app._service_connection = connection
+    if connection is not None:
+        app.ready.connect(connection.start)
+
     def make_binding_dialog(
         origin: str | None = None,
         *,
@@ -92,6 +118,8 @@ def configure_role_workbench(
 
         def reopen_bound_destination() -> None:
             nonlocal refresh_account_on_next_open
+            if connection is not None and dialog.session is not None:
+                connection._complete(dialog.session)
             destination = reopen or app._on_open_custom_role_workbench
             if destination == app._on_open_custom_role_workbench:
                 refresh_account_on_next_open = True
@@ -230,6 +258,8 @@ def configure_role_workbench(
                     return
                 try:
                     binding.unbind()
+                    if connection is not None:
+                        connection.disconnected()
                 except (OSError, ValueError):
                     QMessageBox.critical(
                         dialog,
@@ -264,15 +294,61 @@ def configure_role_workbench(
     app.set_custom_role_workbench_factory(make_workbench)
     app.set_role_credit_dialog_factory(make_credit_dialog)
 
+    def support_id() -> str:
+        try:
+            session = sessions.load()
+            return session.account_id if session is not None else ""
+        except (OSError, ValueError):
+            return ""
+
+    def make_mailbox() -> QDialog:
+        session = None
+        try:
+            session = binding.current_session()
+        except (OSError, ValueError):
+            pass
+        origin = session.service_origin if session is not None else configured_origin
+        public = HttpRoleServiceTransport(origin, "") if origin else None
+        transport = session.transport() if session is not None else None
+
+        def diagnostics():
+            codes = event_reporter.tracker.recent_error_codes() if event_reporter else ()
+            return mailbox_diagnostics(codes)
+
+        dialog = MailboxDialog(
+            public, transport,
+            MailboxReadStore(workspace / "state" / "mailbox-read.json", clock=clock),
+            account_id=session.account_id if session is not None else "",
+            binding_available=origin is not None, diagnostics=diagnostics, clock=clock,
+        )
+        if origin is not None and session is None:
+            def begin_binding() -> None:
+                dialog.accept()
+                make_binding_dialog(origin, reopen=app._on_open_mailbox).exec()
+            dialog.binding_requested.connect(begin_binding)
+        return dialog
+
+    app._support_id_provider = support_id
+    app._mailbox_dialog_factory = make_mailbox
+    if connection is not None:
+        def update_open_mailbox(session: object) -> None:
+            dialog = app._mailbox_dialog
+            if isinstance(dialog, MailboxDialog) and hasattr(session, "transport"):
+                dialog.set_connection(session.transport(), session.account_id)
+
+        connection.connected.connect(update_open_mailbox)
+
 
 def main() -> int:
-    return run(
-        sys.argv,
-        configure=lambda app: configure_role_workbench(
-            app,
-            pilot_notice_enabled=True,
-        ),
-    )
+    def configure(app: MoeGuardApp) -> None:
+        configure_role_workbench(app, pilot_notice_enabled=True)
+        # Update-enabled builds embed a public source; ordinary builds have
+        # no source. MOEGUARD_UPDATE_FEED remains an explicit experiment override.
+        from moeguard.update_controller import configure_self_update
+
+        app._update_controller = configure_self_update(app)
+
+    return run(sys.argv, configure=configure)
 
 
 if __name__ == "__main__":

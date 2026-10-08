@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QThread, Signal
+import threading
+
+from PySide6.QtCore import QObject, QThread, Signal, Slot
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -15,6 +17,87 @@ from moeguard.cloud.role_service_binding import RoleServiceBindingManager
 from moeguard.cloud.role_service_http_client import role_service_user_message
 from moeguard.cloud.role_service_session import RoleServiceSession
 from moeguard.ui import theme
+
+
+class AutomaticServiceConnection(QObject):
+    """Reuse anonymous credentials and connect once in the background at startup."""
+
+    changed = Signal(str, str)
+    connected = Signal(object)
+    _succeeded = Signal(object)
+    _failed = Signal()
+
+    def __init__(self, manager: RoleServiceBindingManager, origin: str, parent=None) -> None:
+        super().__init__(parent)
+        self.manager = manager
+        self.origin = origin
+        self.busy = False
+        self.status = "正在连接服务…"
+        self.account_id = ""
+        self._succeeded.connect(self._complete)
+        self._failed.connect(self._connection_failed)
+
+    def start(self) -> None:
+        if self.manager.auto_connect_disabled_path.exists():
+            self.status = "服务已断开，可重新连接。"
+            self.changed.emit("", self.status)
+            return
+        self.connect_now(manual=False)
+
+    def connect_now(self, *, manual: bool = True) -> None:
+        if self.busy:
+            return
+        self.busy = True
+        self.status = "正在连接服务…"
+        self.changed.emit(self.account_id, self.status)
+
+        def work() -> None:
+            try:
+                session = (
+                    self.manager.bind(self.origin) if manual
+                    else self.manager.bind_automatically(self.origin)
+                )
+            except Exception:  # noqa: BLE001 - no private error details leave the worker
+                try:
+                    self._failed.emit()
+                except RuntimeError:
+                    pass
+                return
+            try:
+                self._succeeded.emit(session)
+            except RuntimeError:
+                pass  # The application may have exited while the request was running.
+
+        threading.Thread(target=work, name="moeguard-service-connect", daemon=True).start()
+
+    @Slot(object)
+    def _complete(self, session: object) -> None:
+        if self.manager.auto_connect_disabled_path.exists():
+            self.disconnected()
+            return
+        if not isinstance(session, RoleServiceSession):
+            self._connection_failed()
+            return
+        self.busy = False
+        self.account_id = session.account_id
+        self.status = "已连接服务。"
+        self.changed.emit(self.account_id, self.status)
+        self.connected.emit(session)
+
+    @Slot()
+    def _connection_failed(self) -> None:
+        if self.manager.auto_connect_disabled_path.exists():
+            self.disconnected()
+            return
+        self.busy = False
+        self.status = "暂时无法连接服务，可重试；本地桌宠可继续使用。"
+        self.changed.emit(self.account_id, self.status)
+
+    def disconnected(self) -> None:
+        self.busy = False
+        self.account_id = ""
+        self.status = "服务已断开，可重新连接。"
+        self.changed.emit("", self.status)
 
 
 class _BindingThread(QThread):

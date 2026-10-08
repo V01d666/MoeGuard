@@ -202,9 +202,14 @@ class MoeGuardApp(QObject):
         self._pending_role_notice: str | None = None
         self._custom_role_workbench_factory: Callable[[], QDialog] | None = None
         self._role_credit_dialog_factory: Callable[[], QDialog] | None = None
+        self._mailbox_dialog_factory: Callable[[], QDialog] | None = None
+        self._support_id_provider: Callable[[], str] | None = None
+        self._service_connection = None
         self._settings_dialog: SettingsDialog | None = None
+        self._update_controller = None
         self._custom_role_workbench_dialog: QDialog | None = None
         self._role_credit_dialog: QDialog | None = None
+        self._mailbox_dialog: QDialog | None = None
         self._shutdown_started = False
 
     # ------------------------------------------------------------------ #
@@ -277,6 +282,40 @@ class MoeGuardApp(QObject):
         except Exception:
             logger.debug("桌宠等待提示失败", exc_info=True)
 
+    def update_blocker(self) -> str:
+        """Why a self-update restart must wait now, or '' when it may proceed.
+
+        A restart during patrol would drop the guard the user deliberately
+        armed, and one during a workshop task would abandon a task that is
+        already billed.  Both simply defer the update.
+        """
+
+        if self._state_machine is not None and self._state_machine.is_patrolling:
+            return "patrol"
+        onboarding = getattr(self, "_onboarding", None)
+        camera_session = getattr(onboarding, "has_camera_session", None)
+        if callable(camera_session) and camera_session():
+            return "owner_registration"
+        dialog = self._custom_role_workbench_dialog
+        has_task = getattr(dialog, "has_running_task", None)
+        if callable(has_task) and has_task():
+            return "workshop_task"
+        mailbox = getattr(self, "_mailbox_dialog", None)
+        has_message = getattr(mailbox, "has_unsent_message", None)
+        if callable(has_message) and has_message():
+            return "mailbox_message"
+        return ""
+
+    def notify_update(self, title: str, message: str) -> None:
+        """Tray balloon for update progress; never raises."""
+
+        if self._tray is None:
+            return
+        try:
+            self._tray.show_message(title, message)
+        except Exception:
+            logger.debug("更新通知发送失败", exc_info=True)
+
     def notify_workbench_result(self, title: str, message: str) -> None:
         """Call the user back after a wait they were free to walk away from.
 
@@ -308,6 +347,10 @@ class MoeGuardApp(QObject):
         """启动应用：加载配置、恢复状态、进入陪伴模式。"""
         # 1. 加载配置
         self._config = AppConfig.load()
+        if self._update_controller is not None:
+            # Entrypoint configuration precedes start(); reconcile the persisted
+            # preference before the Qt event loop can fire the startup timer.
+            self._update_controller.set_auto_check_enabled(self._config.updates.auto_check_enabled)
         logger.info("配置加载完成")
 
         # 2. 确保目录存在
@@ -1095,7 +1138,25 @@ class MoeGuardApp(QObject):
             role_credit_dialog_available=(
                 self._role_credit_dialog_factory is not None
             ),
+            self_update_available=(self._update_controller is not None),
+            update_status=(
+                self._update_controller.status_text if self._update_controller else ""
+            ),
+            mailbox_available=self._mailbox_dialog_factory is not None,
+            support_id=self._support_id_provider() if self._support_id_provider else "",
+            service_connection_available=self._service_connection is not None,
+            service_connection_status=(
+                self._service_connection.status if self._service_connection is not None else ""
+            ),
         )
+        if self._service_connection is not None:
+            dialog.connect_service_requested.connect(self._service_connection.connect_now)
+            self._service_connection.changed.connect(dialog.set_service_connection)
+        if self._update_controller is not None:
+            dialog.check_update_requested.connect(
+                lambda: self._update_controller.check_now(manual=True)
+            )
+            self._update_controller.status_changed.connect(dialog.update_status_label.setText)
         dialog.withdraw_patrol_consent_requested.connect(self._withdraw_patrol_consent)
         self.withdrawal_completed.connect(dialog.apply_withdrawal_result)
         dialog.manage_evidence_requested.connect(self._on_open_evidence_manager)
@@ -1105,6 +1166,7 @@ class MoeGuardApp(QObject):
         dialog.role_credit_dialog_requested.connect(
             self._on_open_role_credit_dialog
         )
+        dialog.mailbox_requested.connect(self._on_open_mailbox)
         self._settings_dialog = dialog
 
         def finish_settings(result: int) -> None:
@@ -1231,6 +1293,28 @@ class MoeGuardApp(QObject):
         dialog.raise_()
         dialog.activateWindow()
 
+    def _on_open_mailbox(self) -> None:
+        factory = self._mailbox_dialog_factory
+        if factory is None:
+            return
+        if self._mailbox_dialog is not None:
+            self._mailbox_dialog.show()
+            self._mailbox_dialog.raise_()
+            self._mailbox_dialog.activateWindow()
+            return
+        dialog = factory()
+        self._mailbox_dialog = dialog
+
+        def finish_mailbox(_result: int) -> None:
+            if self._mailbox_dialog is dialog:
+                self._mailbox_dialog = None
+            dialog.deleteLater()
+
+        dialog.finished.connect(finish_mailbox)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
     def _on_open_security_setup(self) -> None:
         """允许拒绝过引导的用户从托盘重新作出主动同意。"""
         assert self._state_machine is not None
@@ -1274,6 +1358,12 @@ class MoeGuardApp(QObject):
                 motion_recording_enabled=vals["motion_recording_enabled"],
             ),
             dialogue=DialogueConfig(),
+            updates=dc_replace(
+                self._config.updates,
+                auto_check_enabled=vals.get(
+                    "auto_check_enabled", self._config.updates.auto_check_enabled
+                ),
+            ),
             presence=dc_replace(
                 self._config.presence,
                 auto_patrol_enabled=vals["auto_patrol_enabled"],
@@ -1315,6 +1405,8 @@ class MoeGuardApp(QObject):
         self._evidence_store.update_retention_days(
             self._config.evidence.retention_days
         )
+        if self._update_controller is not None:
+            self._update_controller.set_auto_check_enabled(self._config.updates.auto_check_enabled)
 
     def _withdraw_patrol_consent(self) -> bool:
         """撤回同意并严格删除值守数据；通过信号回传可重试结果。"""
@@ -1671,12 +1763,14 @@ class MoeGuardApp(QObject):
             self._settings_dialog,
             self._custom_role_workbench_dialog,
             self._role_credit_dialog,
+            self._mailbox_dialog,
         ):
             if dialog is not None:
                 dialog.close()
         self._settings_dialog = None
         self._custom_role_workbench_dialog = None
         self._role_credit_dialog = None
+        self._mailbox_dialog = None
 
         recorder_stopped = True
         if self._evidence is not None:

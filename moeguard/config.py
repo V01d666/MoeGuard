@@ -149,6 +149,13 @@ class ImageGenConfig:
 
 
 @dataclass(frozen=True)
+class UpdateConfig:
+    """更新检查偏好；关闭自动检查后仍可手动检查。"""
+
+    auto_check_enabled: bool = True
+
+
+@dataclass(frozen=True)
 class AppConfig:
     """萌卫应用总配置。"""
 
@@ -160,6 +167,7 @@ class AppConfig:
     dialogue: DialogueConfig = field(default_factory=DialogueConfig)
     pet: PetConfig = field(default_factory=PetConfig)
     image_gen: ImageGenConfig = field(default_factory=ImageGenConfig)
+    updates: UpdateConfig = field(default_factory=UpdateConfig)
 
     @classmethod
     def load(cls, path: Path | None = None) -> AppConfig:
@@ -294,6 +302,14 @@ class AppConfig:
                     if k in ImageGenConfig.__dataclass_fields__
                 }),
             )
+
+        updates_data = data.get("updates", {})
+        if isinstance(updates_data, dict) and "auto_check_enabled" in updates_data:
+            enabled = updates_data["auto_check_enabled"]
+            if isinstance(enabled, bool):
+                config = replace(config, updates=UpdateConfig(auto_check_enabled=enabled))
+            else:
+                logger.warning("忽略无效的自动检查更新配置")
 
         return config
 

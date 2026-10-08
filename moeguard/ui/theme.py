@@ -56,6 +56,7 @@ RADIUS_XLARGE = 16    # 引导气泡
 SPACE_SMALL = 6
 SPACE_MEDIUM = 10
 SPACE_LARGE = 16
+CARD_MARGINS = (14, 12, 14, 12)
 
 CONTROL_MIN_HEIGHT = 26  # 输入控件 / 按钮最小高度（DPI 友好，不锁死固定高度）
 
@@ -124,6 +125,20 @@ def bubble_qss(radius: int = RADIUS_XLARGE) -> str:
 # ---------------------------------------------------------------------------
 # 模态对话框（设置 / 证据）作用域 QSS
 # ---------------------------------------------------------------------------
+
+
+def flat_card_qss(scope: str) -> str:
+    """Shared card surface; layouts use CARD_MARGINS for the inner spacing."""
+    return f"""
+QDialog#{scope} QFrame[flatCard="true"] {{
+    background: {PANEL_BG};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS_MEDIUM}px;
+}}
+QDialog#{scope} QFrame[flatCard="true"][role="dangerSection"] {{
+    border-color: {DANGER};
+}}
+"""
 
 
 def dialog_qss(scope: str) -> str:
@@ -244,4 +259,4 @@ QDialog#{scope} QScrollBar::add-line:vertical,
 QDialog#{scope} QScrollBar::sub-line:vertical {{
     height: 0;
 }}
-"""
+""" + flat_card_qss(scope)

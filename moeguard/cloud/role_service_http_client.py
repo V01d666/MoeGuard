@@ -34,6 +34,14 @@ from moeguard.cloud.role_service_event_contract import (
     ClientEvent,
     serialize_client_event_batch,
 )
+from moeguard.cloud.role_service_mailbox_contract import (
+    MAX_MAILBOX_REQUEST_BYTES,
+    Announcement,
+    MailboxMessageRequest,
+    MailboxPostReceipt,
+    MailboxThread,
+    parse_announcements,
+)
 
 _JSON_MEDIA_TYPE = "application/json"
 _ZIP_MEDIA_TYPE = "application/vnd.moeguard.result+zip"
@@ -447,7 +455,7 @@ class HttpRoleServiceTransport:
             raw = json.loads(payload.decode())
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ValueError("role service returned invalid JSON") from exc
-        if not isinstance(raw, dict) or set(raw) != {"schema_version", "data"}:
+        if not isinstance(raw, dict) or not {"schema_version", "data"} <= set(raw):
             raise ValueError("role service JSON response schema is invalid")
         if raw["schema_version"] != 1:
             raise ValueError("role service JSON response version is unsupported")
@@ -479,11 +487,11 @@ class HttpRoleServiceTransport:
             authenticated=False,
         )
         raw = cls._data(payload)
-        if not isinstance(raw, dict) or set(raw) != {
+        if not isinstance(raw, dict) or not {
             "account_id",
             "bearer_token",
             "expires_at",
-        }:
+        } <= set(raw):
             raise ValueError("role service enrollment response schema is invalid")
         account_id = str(raw["account_id"])
         bearer_token = str(raw["bearer_token"])
@@ -518,7 +526,7 @@ class HttpRoleServiceTransport:
                 },
                 timeout=self.transfer_timeout,
             )
-            return ServiceAssetRef.from_dict(self._data(payload))
+            return ServiceAssetRef.from_dict(self._data(payload), allow_extra_fields=True)
 
         return self._retry_transfer(attempt)
 
@@ -550,7 +558,7 @@ class HttpRoleServiceTransport:
             "available_i2v_units",
             "available_flexible_units",
         }
-        if not isinstance(raw, dict) or set(raw) != expected_fields:
+        if not isinstance(raw, dict) or not expected_fields <= set(raw):
             raise ValueError("role service account response schema is invalid")
         values = tuple(raw[key] for key in expected_fields)
         if any(
@@ -582,7 +590,7 @@ class HttpRoleServiceTransport:
             "available_i2v_units",
             "available_flexible_units",
         }
-        if not isinstance(raw, dict) or set(raw) != expected_fields:
+        if not isinstance(raw, dict) or not expected_fields <= set(raw):
             raise ValueError("role service credit redemption response is invalid")
         values = tuple(raw[key] for key in expected_fields)
         if any(
@@ -610,7 +618,7 @@ class HttpRoleServiceTransport:
         )
         raw = self._data(payload)
         expected_fields = {"accepted_count", "duplicate_count", "received_at_ms"}
-        if not isinstance(raw, dict) or set(raw) != expected_fields:
+        if not isinstance(raw, dict) or not expected_fields <= set(raw):
             raise ValueError("role service client event response is invalid")
         accepted = raw["accepted_count"]
         duplicates = raw["duplicate_count"]
@@ -624,6 +632,26 @@ class HttpRoleServiceTransport:
             raise ValueError("role service client event receipt does not match batch")
         return RoleServiceClientEventReceipt(accepted, duplicates, received_at_ms)
 
+    def announcements(self) -> tuple[Announcement, ...]:
+        payload, _headers = self._request("GET", "/v1/announcements", authenticated=False)
+        return parse_announcements(self._data(payload))
+
+    def mailbox_thread(self) -> MailboxThread:
+        payload, _headers = self._request("GET", "/v1/mailbox/messages")
+        return MailboxThread.from_response(self._data(payload))
+
+    def post_mailbox_message(self, message: MailboxMessageRequest) -> MailboxPostReceipt:
+        # Validate again at the network boundary, even for directly built objects.
+        validated = MailboxMessageRequest.from_dict(message.to_dict())
+        body = _json_bytes(validated.to_dict())
+        if len(body) > MAX_MAILBOX_REQUEST_BYTES:
+            raise ValueError("mailbox message request is too large")
+        payload, _headers = self._request(
+            "POST", "/v1/mailbox/messages", body=body,
+            headers={"Content-Type": _JSON_MEDIA_TYPE},
+        )
+        return MailboxPostReceipt.from_response(self._data(payload))
+
     def create_purchase_intent(self) -> RoleServicePurchaseIntent:
         payload, _headers = self._request(
             "POST",
@@ -631,10 +659,10 @@ class HttpRoleServiceTransport:
             headers={"Content-Type": _JSON_MEDIA_TYPE},
         )
         raw = self._data(payload)
-        if not isinstance(raw, dict) or set(raw) != {
+        if not isinstance(raw, dict) or not {
             "custom_order_id",
             "expires_at",
-        }:
+        } <= set(raw):
             raise ValueError("role service purchase intent response schema is invalid")
         custom_order_id = raw["custom_order_id"]
         expires_at = raw["expires_at"]

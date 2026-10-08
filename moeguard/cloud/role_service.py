@@ -274,9 +274,15 @@ class ServiceAssetRef:
             raise ValueError("unsupported service asset media type")
         if self.purpose not in _ASSET_PURPOSES:
             raise ValueError("unsupported service asset purpose")
-        if isinstance(self.size_bytes, bool) or not 1 <= self.size_bytes <= _MAX_ASSET_BYTES:
+        if (
+            isinstance(self.size_bytes, bool) or not isinstance(self.size_bytes, int)
+            or not 1 <= self.size_bytes <= _MAX_ASSET_BYTES
+        ):
             raise ValueError("service asset size is outside the supported range")
-        if isinstance(self.expires_at, bool) or self.expires_at <= 0:
+        if (
+            isinstance(self.expires_at, bool) or not isinstance(self.expires_at, int)
+            or self.expires_at <= 0
+        ):
             raise ValueError("service asset expiry must be a positive Unix timestamp")
 
     def to_dict(self) -> dict[str, Any]:
@@ -289,21 +295,26 @@ class ServiceAssetRef:
         }
 
     @classmethod
-    def from_dict(cls, raw: Any) -> ServiceAssetRef:
-        if not isinstance(raw, dict) or set(raw) != {
+    def from_dict(cls, raw: Any, *, allow_extra_fields: bool = False) -> ServiceAssetRef:
+        # Responses can grow; incoming requests and local contracts stay strict.
+        required = {
             "sha256",
             "media_type",
             "purpose",
             "size_bytes",
             "expires_at",
-        }:
+        }
+        if (
+            not isinstance(raw, dict) or not required <= set(raw)
+            or (not allow_extra_fields and set(raw) != required)
+        ):
             raise ValueError("service asset reference schema is invalid")
         return cls(
-            sha256=str(raw["sha256"]),
-            media_type=str(raw["media_type"]),
-            purpose=str(raw["purpose"]),
-            size_bytes=int(raw["size_bytes"]),
-            expires_at=int(raw["expires_at"]),
+            sha256=raw["sha256"],
+            media_type=raw["media_type"],
+            purpose=raw["purpose"],
+            size_bytes=raw["size_bytes"],
+            expires_at=raw["expires_at"],
         )
 
 

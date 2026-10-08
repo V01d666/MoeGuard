@@ -12,7 +12,7 @@
 
 > An anime desktop pet you can shape any way you like, one that grows along with you and happens to keep watch, too (｡•̀ᴗ-)✧
 
-[![Release](https://img.shields.io/github/v/release/V01d666/MoeGuard?label=release&color=946CE6)](https://github.com/V01d666/MoeGuard/releases)
+[![Release](https://img.shields.io/github/v/release/V01d666/MoeGuard?label=release&color=946CE6)](https://github.com/V01d666/MoeGuard/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-blue)](https://github.com/V01d666/MoeGuard/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 
@@ -27,11 +27,11 @@
 
 Then [give MoeGuard a try](https://github.com/V01d666/MoeGuard/releases)!
 
-Write a short description or drop in a picture, and you get a pet that's truly yours, animations included. Bored of the look? Give it a makeover whenever you like.
+Write a short description or drop in a picture, and you get a pet that's truly yours, animations included. Bored of the look? Give it a makeover whenever you like
 
 Most of the time it hangs out at the edge of your screen while you work (or slack off), reacting when you poke it or pick it up. Lock your screen and walk away, and, only with your explicit consent, it turns on the camera and keeps an eye on things. The moment you're back, the camera goes off and it tells you what happened while you were gone. Who says pets just freeload? (•̀ᴗ•́)و
 
-It isn't a security camera dressed up as a pet. Think of it as a little partner who sometimes takes the job a bit too seriously: keeping you company most of the time, and keeping watch when needed.
+It isn't a security camera dressed up as a pet. Think of it as a little partner who sometimes takes the job a bit too seriously: keeping you company most of the time, and keeping watch when needed
 
 <p align="center">
   <img src=".github/assets/baseCharas.png" alt="Starter characters: Lumen, Poppy, and Rook" width="100%">
@@ -50,12 +50,43 @@ It isn't a security camera dressed up as a pet. Think of it as a little partner 
 
 ## Jump right in
 
-Grab the Windows x64 ZIP from [GitHub Releases](https://github.com/V01d666/MoeGuard/releases), extract all of it, and double-click `MoeGuard.exe`. No Python needed. Just want the pet? No camera required; it's only used for watch duty.
+Download the **Windows x64 stable installer (recommended)** and double-click it to get started, with no Python required
 
-The first launch walks you through the risks of watch duty. You can simply enjoy the pet and turn on watch duty in Settings whenever you're ready.
+Check for updates later in Settings; confirm to install and restart, keeping your settings, characters, and workshop history
+
+Choose any of these channels for the same installer:
+
+| 🐙 GitHub Releases | 🌐 Official direct link | ☁️ Baidu Netdisk |
+| :---: | :---: | :---: |
+| [Stable installer on GitHub](https://github.com/V01d666/MoeGuard/releases/latest/download/MoeGuard-Setup.exe) | [Official installer](https://api.moeproject.net/updates/windows/stable/MoeGuard-0.3.0-win-Setup.exe) | [Baidu Netdisk download](https://pan.baidu.com/s/1NwsshuNjPHxKpGryjyR5ZA?pwd=moeg) |
+
+Just want the pet? No camera required. The first launch explains the risks of watch duty; you can enjoy the pet and enable watch duty later in Settings
 
 <details>
-<summary>Running from source?</summary>
+<summary>📦 Portable edition</summary>
+
+Download the Portable ZIP, extract it completely, and double-click `MoeGuard.exe`
+
+**To get new features and improvements, you'll need to download the latest version manually; we strongly recommend the installer (｡•̀ᴗ-)✧**
+
+| 🐙 GitHub Releases | 🌐 Official direct link | ☁️ Baidu Netdisk |
+| :---: | :---: | :---: |
+| [Portable ZIP on GitHub](https://github.com/V01d666/MoeGuard/releases/download/v0.3.0/MoeGuard-0.3.0-win-Portable.zip) | [Official portable ZIP](https://api.moeproject.net/updates/windows/stable/MoeGuard-0.3.0-win-Portable.zip) | [Baidu Netdisk portable edition](https://pan.baidu.com/s/1OqRQ_peEx4zJvMvgOC858g?pwd=moeg) |
+
+</details>
+
+<details>
+<summary>🔎 File verification (v0.3.0)</summary>
+
+| File | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `MoeGuard-Setup.exe` | 206563726 | `21c09e08994bdd49b1d036922ddd4f6b08ef98244df66697ee30c594345de4ec` |
+| `MoeGuard-0.3.0-win-Portable.zip` | 198837243 | `98a20f5d676c3b8d4da6250a3baeb20485a45c5f5501fc0b5faefcc4a2590cf2` |
+
+</details>
+
+<details>
+<summary>🛠️ Running from source</summary>
 
 You'll need **64-bit Windows 10/11 and Python 3.12**:
 
@@ -71,10 +102,11 @@ py -3.12 -m venv .venv
 
 ### 🎟️ Want to try Pet Workshop?
 
-The starter characters and watch duty don't need a code. Pet Workshop generates in the cloud and counts character art and action generations separately. For now these credits come only from redemption codes, which aren't for sale yet; they're handed out from time to time in events on our [Afdian page](https://ifdian.net/a/moeguard), so drop by now and then～ Once you have one, redeem it under “设置 → 查看次数 / 兑换码…” (Settings → View credits / Redeem code; the app is currently Chinese-only).
+The starter characters and watch duty don't need a code. Pet Workshop generates in the cloud and counts character art and action generations separately. For now these credits come only from redemption codes, which aren't for sale yet; they're handed out from time to time in events on our [Afdian page](https://ifdian.net/a/moeguard), so drop by now and then～ Once you have one, redeem it under “设置 → 查看次数 / 兑换码…” (Settings → View credits / Redeem code; the app is currently Chinese-only)
 
 ## Timeline
 
+- [2026/10/08] 🎉 [MoeGuard v0.3.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.3.0) is out! The installed edition now supports updates in place, with a built-in mailbox and support ID for feedback and a version display in Settings
 - [2026/09/24] 🎉 [MoeGuard v0.2.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0) is out! Pet Workshop is finally ready for everyone, along with generation progress and time estimates, done notifications, and character export and import
 - [2026/09/01] 🧪 [v0.2.0 Preview](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0-preview) opened a limited trial, putting Pet Workshop in people's hands for the first time; see the [Afdian announcement](https://ifdian.net/p/d2c072d4a61d11f1bd1c5254001e7c00)
 - [2026/08/23] 🎬 The first hands-on Pet Workshop demos are here: watch [text to pet](.github/assets/text2pet-demo.mp4) and [image to pet](.github/assets/image2pet-demo.mp4) from start to finish
@@ -92,24 +124,24 @@ Pet Workshop lets anyone create a character they love, but that's only the first
 - 🎁 **One-click sharing**: pack a character into a single file and send it to a friend to import
 - 📡 **Remote alerts**: the moment something stirs during watch duty, a push to your phone, so you can relax while you're out
 
-That's the plan, but a feature only moves into “MoeGuard today” once it's built, tested, and ready to download. Progress is shared on GitHub and [Afdian](https://ifdian.net/a/moeguard).
+That's the plan, but a feature only moves into “MoeGuard today” once it's built, tested, and ready to download. Progress is shared on GitHub and [Afdian](https://ifdian.net/a/moeguard)
 
-## Camera, cloud generation, and your data
+<details>
+<summary>🔒 Camera, cloud generation, and data handling</summary>
 
-- The camera opens only for owner registration and watch duty, never when you switch characters or change settings
-- Watch footage, face features, and evidence all stay on your PC; there is no cloud face recognition
-- Only when you generate something in Pet Workshop are the related text, reference image, and task assets uploaded; to diagnose quality and interrupted tasks, these materials are temporarily retained on the service and cleaned up in campaign batches
-- Pet Workshop also reports a small set of usage events (screen, step, duration, error code, task ID) to help troubleshoot, with no prompts, images, local paths, or watch data
-- Owner features live in `%USERPROFILE%\.moeguard\owner\` and evidence in `%USERPROFILE%\.moeguard\evidence\`; watch events are kept for 7 days by default
-- Revoking watch consent in Settings stops capture and deletes owner features and evidence, and tells you plainly if something can't be deleted; for a full wipe, quit MoeGuard and delete the whole `%USERPROFILE%\.moeguard\` folder
-- Optional “blur strangers' faces”: if no face is found the whole frame is downscaled, and if the detector is unavailable nothing is saved at all, though a few may still slip through
-- Backlight, obstructions, people passing quickly, a busy camera, or a closed lid, sleep, and power saving can all cause misses or interruptions; please use it only on your own device, in a private space where everyone knows
+- **Camera**: used only for owner registration and watch duty. Face features, footage, and evidence stay on your PC; watch evidence is kept for 7 days by default
+- **Connections and updates**: startup creates or reuses anonymous service credentials and a support ID; local pet functions still work if the connection fails. Update requests carry no account credentials or cookies
+- **Cloud generation**: active generation uploads text, reference images, and task assets, cleaned up on the service in campaign batches. A small set of usage events excludes prompts, images, local paths, and watch data
+- **Mailbox**: messages are sent only after confirmation. Diagnostics are off by default and limited to the app version, Windows major version, architecture, and up to 5 recent error codes. Only read fingerprints and timestamps are kept locally. Cloud messages are currently not deleted automatically, and deleting local data does not delete messages already sent
+- **Stopping and deleting**: revoke watch consent in Settings to stop capture and delete owner features and evidence. For a full wipe, quit the app and delete `%USERPROFILE%\.moeguard\`; this also removes anonymous account credentials
 
-MoeGuard tries hard to help, but it isn't a professional security device. It can't replace your system lock screen or a real surveillance product, and it doesn't guarantee accurate detection or uninterrupted watch. Open source means you can see for yourself when the camera turns on, where data goes, how it stops when something breaks, and how to delete what you no longer want.
+Use it on your own device in a private space where others know. Detection can miss events, and obstructions, a busy camera, or system sleep can interrupt watch duty. MoeGuard cannot replace your system lock screen or professional security equipment
+
+</details>
 
 ## Feedback and development
 
-Found a bug or have an idea? Come chat in [GitHub Issues](https://github.com/V01d666/MoeGuard/issues)! Before sharing logs, remove usernames, local paths, photos, videos, owner features, and API keys, and **never upload the whole `.moeguard`, `evidence`, or `owner` folder**.
+Found a bug or have an idea? Open the mailbox and copy your support ID under “设置 → 通用 → 关于与反馈” (Settings → General → About and feedback), or come chat in [GitHub Issues](https://github.com/V01d666/MoeGuard/issues)! Before sharing logs, remove usernames, local paths, photos, videos, owner features, and API keys, and **never upload the whole `.moeguard`, `evidence`, or `owner` folder**
 
 MoeGuard is an after-hours hobby project, so there's no promise of enterprise response times, every-platform support, or a fixed release schedule. If it made you smile, a ⭐ Star or a little support on [Afdian](https://ifdian.net/a/moeguard) means a lot～
 
@@ -121,4 +153,4 @@ Want to contribute? Start with:
 .\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp .pytest-tmp/local
 ```
 
-The source code and the three bundled character asset sets are licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for a short statement about bundled models.
+The source code and the three bundled character asset sets are licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for a short statement about bundled models

@@ -8,6 +8,7 @@ import os
 import threading
 import time
 import uuid
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -323,6 +324,12 @@ class PreviewClientEventTracker:
         self.journey_id = str(uuid_factory())
         self._sequence = 0
         self._identity_lock = threading.RLock()
+        self._recent_errors: deque[str] = deque(maxlen=5)
+
+    def recent_error_codes(self) -> tuple[str, ...]:
+        """In-memory diagnostics drawn only from already validated event codes."""
+        with self._identity_lock:
+            return tuple(self._recent_errors)
 
     def enabled(self) -> bool:
         try:
@@ -361,6 +368,9 @@ class PreviewClientEventTracker:
                         "properties": dict(properties or {}),
                     }
                 )
+                code = dict(event.properties).get("error_code")
+                if isinstance(code, str):
+                    self._recent_errors.append(code)
                 return self.outbox.enqueue(event)
         except Exception:
             return False

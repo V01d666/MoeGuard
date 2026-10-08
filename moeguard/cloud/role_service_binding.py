@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -180,6 +181,10 @@ class RoleServiceBindingManager:
         self.enrollment_store = enrollment_store
         self._enroll = enroll or HttpRoleServiceTransport.enroll
         self._clock = clock
+        self._binding_lock = threading.RLock()
+        self.auto_connect_disabled_path = session_store.path.with_name(
+            "automatic-connection-disabled"
+        )
 
     def current_session(self) -> RoleServiceSession | None:
         session = self.session_store.load()
@@ -188,6 +193,18 @@ class RoleServiceBindingManager:
         return session
 
     def bind(self, service_origin: str) -> RoleServiceSession:
+        with self._binding_lock:
+            session = self._bind(service_origin)
+            self.auto_connect_disabled_path.unlink(missing_ok=True)
+            return session
+
+    def bind_automatically(self, service_origin: str) -> RoleServiceSession | None:
+        with self._binding_lock:
+            if self.auto_connect_disabled_path.exists():
+                return None
+            return self.bind(service_origin)
+
+    def _bind(self, service_origin: str) -> RoleServiceSession:
         origin = https_role_service_origin(service_origin)
         try:
             session = self.current_session()
@@ -224,5 +241,13 @@ class RoleServiceBindingManager:
         return session
 
     def unbind(self) -> None:
-        self.session_store.delete()
-        self.enrollment_store.delete()
+        with self._binding_lock:
+            marker = self.auto_connect_disabled_path
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            if marker.is_symlink():
+                raise ValueError("automatic connection preference path is unsafe")
+            if not marker.exists():
+                with marker.open("xb"):
+                    pass
+            self.session_store.delete()
+            self.enrollment_store.delete()
