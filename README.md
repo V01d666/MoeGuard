@@ -58,7 +58,7 @@
 
 | 🐙 GitHub Releases | 🌐 官网直链 | ☁️ 百度网盘 |
 | :---: | :---: | :---: |
-| [GitHub 稳定安装版](https://github.com/V01d666/MoeGuard/releases/latest/download/MoeGuard-Setup.exe) | [官网安装包直链](https://api.moeproject.net/updates/windows/stable/MoeGuard-0.3.0-win-Setup.exe) | [百度网盘下载](https://pan.baidu.com/s/1NwsshuNjPHxKpGryjyR5ZA?pwd=moeg) |
+| [GitHub 稳定安装版](https://github.com/V01d666/MoeGuard/releases/latest/download/MoeGuard-Setup.exe) | [官网安装包直链](https://api.moeproject.net/updates/windows/stable/MoeGuard-Setup.exe) | [百度网盘下载](https://pan.baidu.com/s/1NwsshuNjPHxKpGryjyR5ZA?pwd=moeg) |
 
 只养桌宠用不到摄像头。第一次启动会讲清楚值守的风险，你可以只养桌宠，看家功能随时再到设置里开启
 
@@ -71,7 +71,7 @@
 
 | 🐙 GitHub Releases | 🌐 官网直链 | ☁️ 百度网盘 |
 | :---: | :---: | :---: |
-| [GitHub 免安装 ZIP](https://github.com/V01d666/MoeGuard/releases/download/v0.3.0/MoeGuard-0.3.0-win-Portable.zip) | [官网免安装 ZIP 直链](https://api.moeproject.net/updates/windows/stable/MoeGuard-0.3.0-win-Portable.zip) | [百度网盘免安装版](https://pan.baidu.com/s/1OqRQ_peEx4zJvMvgOC858g?pwd=moeg) |
+| [GitHub 免安装 ZIP](https://github.com/V01d666/MoeGuard/releases/download/v0.3.0/MoeGuard-0.3.0-win-Portable.zip) | [官网免安装 ZIP 直链](https://api.moeproject.net/updates/windows/stable/MoeGuard-Portable.zip) | [百度网盘免安装版](https://pan.baidu.com/s/1OqRQ_peEx4zJvMvgOC858g?pwd=moeg) |
 
 </details>
 

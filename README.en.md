@@ -58,7 +58,7 @@ Choose any of these channels for the same installer:
 
 | 🐙 GitHub Releases | 🌐 Official direct link | ☁️ Baidu Netdisk |
 | :---: | :---: | :---: |
-| [Stable installer on GitHub](https://github.com/V01d666/MoeGuard/releases/latest/download/MoeGuard-Setup.exe) | [Official installer](https://api.moeproject.net/updates/windows/stable/MoeGuard-0.3.0-win-Setup.exe) | [Baidu Netdisk download](https://pan.baidu.com/s/1NwsshuNjPHxKpGryjyR5ZA?pwd=moeg) |
+| [Stable installer on GitHub](https://github.com/V01d666/MoeGuard/releases/latest/download/MoeGuard-Setup.exe) | [Official installer](https://api.moeproject.net/updates/windows/stable/MoeGuard-Setup.exe) | [Baidu Netdisk download](https://pan.baidu.com/s/1NwsshuNjPHxKpGryjyR5ZA?pwd=moeg) |
 
 Just want the pet? No camera required. The first launch explains the risks of watch duty; you can enjoy the pet and enable watch duty later in Settings
 
@@ -71,7 +71,7 @@ Download the Portable ZIP, extract it completely, and double-click `MoeGuard.exe
 
 | 🐙 GitHub Releases | 🌐 Official direct link | ☁️ Baidu Netdisk |
 | :---: | :---: | :---: |
-| [Portable ZIP on GitHub](https://github.com/V01d666/MoeGuard/releases/download/v0.3.0/MoeGuard-0.3.0-win-Portable.zip) | [Official portable ZIP](https://api.moeproject.net/updates/windows/stable/MoeGuard-0.3.0-win-Portable.zip) | [Baidu Netdisk portable edition](https://pan.baidu.com/s/1OqRQ_peEx4zJvMvgOC858g?pwd=moeg) |
+| [Portable ZIP on GitHub](https://github.com/V01d666/MoeGuard/releases/download/v0.3.0/MoeGuard-0.3.0-win-Portable.zip) | [Official portable ZIP](https://api.moeproject.net/updates/windows/stable/MoeGuard-Portable.zip) | [Baidu Netdisk portable edition](https://pan.baidu.com/s/1OqRQ_peEx4zJvMvgOC858g?pwd=moeg) |
 
 </details>
 
