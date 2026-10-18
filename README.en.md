@@ -58,7 +58,7 @@ Choose any of these channels for the same installer:
 
 | 🐙 GitHub Releases | 🌐 Official direct link | ☁️ Baidu Netdisk |
 | :---: | :---: | :---: |
-| [Stable installer on GitHub](https://github.com/V01d666/MoeGuard/releases/latest/download/MoeGuard-Setup.exe) | [Official installer](https://api.moeproject.net/updates/windows/stable/MoeGuard-Setup.exe) | [Baidu Netdisk download](https://pan.baidu.com/s/1NwsshuNjPHxKpGryjyR5ZA?pwd=moeg) |
+| [Stable installer on GitHub](https://github.com/V01d666/MoeGuard/releases/latest/download/MoeGuard-Setup.exe) | [Official installer](https://api.moeproject.net/updates/windows/stable/MoeGuard-Setup.exe) | [Baidu Netdisk download](https://pan.baidu.com/s/1K_EUUpXF-CR2h0dJ_Dlr7g?pwd=moeg) |
 
 Just want the pet? No camera required. The first launch explains the risks of watch duty; you can enjoy the pet and enable watch duty later in Settings
 
@@ -71,17 +71,17 @@ Download the Portable ZIP, extract it completely, and double-click `MoeGuard.exe
 
 | 🐙 GitHub Releases | 🌐 Official direct link | ☁️ Baidu Netdisk |
 | :---: | :---: | :---: |
-| [Portable ZIP on GitHub](https://github.com/V01d666/MoeGuard/releases/download/v0.3.0/MoeGuard-0.3.0-win-Portable.zip) | [Official portable ZIP](https://api.moeproject.net/updates/windows/stable/MoeGuard-Portable.zip) | [Baidu Netdisk portable edition](https://pan.baidu.com/s/1OqRQ_peEx4zJvMvgOC858g?pwd=moeg) |
+| [Portable ZIP on GitHub](https://github.com/V01d666/MoeGuard/releases/download/v0.4.0/MoeGuard-0.4.0-win-Portable.zip) | [Official portable ZIP](https://api.moeproject.net/updates/windows/stable/MoeGuard-Portable.zip) | [Baidu Netdisk portable edition](https://pan.baidu.com/s/1089PgfbfbggP7I0Ld2wDFQ?pwd=moeg) |
 
 </details>
 
 <details>
-<summary>🔎 File verification (v0.3.0)</summary>
+<summary>🔎 File verification (v0.4.0)</summary>
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `MoeGuard-Setup.exe` | 206563726 | `21c09e08994bdd49b1d036922ddd4f6b08ef98244df66697ee30c594345de4ec` |
-| `MoeGuard-0.3.0-win-Portable.zip` | 198837243 | `98a20f5d676c3b8d4da6250a3baeb20485a45c5f5501fc0b5faefcc4a2590cf2` |
+| `MoeGuard-Setup.exe` | 206577756 | `316cde63faed3e4f10b3860d06a2c73a49543aa0e4f44c87e62a573010c16b96` |
+| `MoeGuard-0.4.0-win-Portable.zip` | 198851273 | `0047bf7c83b24d41b342ba0dc74e78637112326c04c156147673f4d7dd127dd4` |
 
 </details>
 
@@ -106,6 +106,7 @@ The starter characters and watch duty don't need a code. Pet Workshop generates 
 
 ## Timeline
 
+- [2026/10/18] 🎉 [MoeGuard v0.4.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.0) is out! Service connections and generation credits refresh automatically, credit warnings are clearer, and upgrades keep your existing support ID
 - [2026/10/08] 🎉 [MoeGuard v0.3.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.3.0) is out! The installed edition now supports updates in place, with a built-in mailbox and support ID for feedback and a version display in Settings
 - [2026/09/24] 🎉 [MoeGuard v0.2.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0) is out! Pet Workshop is finally ready for everyone, along with generation progress and time estimates, done notifications, and character export and import
 - [2026/09/01] 🧪 [v0.2.0 Preview](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0-preview) opened a limited trial, putting Pet Workshop in people's hands for the first time; see the [Afdian announcement](https://ifdian.net/p/d2c072d4a61d11f1bd1c5254001e7c00)
@@ -130,8 +131,8 @@ That's the plan, but a feature only moves into “MoeGuard today” once it's bu
 <summary>🔒 Camera, cloud generation, and data handling</summary>
 
 - **Camera**: used only for owner registration and watch duty. Face features, footage, and evidence stay on your PC; watch evidence is kept for 7 days by default
-- **Connections and updates**: startup creates or reuses anonymous service credentials and a support ID; local pet functions still work if the connection fails. Update requests carry no account credentials or cookies
-- **Cloud generation**: active generation uploads text, reference images, and task assets, cleaned up on the service in campaign batches. A small set of usage events excludes prompts, images, local paths, and watch data
+- **Connections and updates**: startup creates or reuses anonymous service credentials and a support ID, and reconnects once the network is back; local pet functions still work if the connection fails. Update requests carry no account credentials or cookies
+- **Cloud generation**: active generation uploads text, reference images, and task assets, cleaned up on the service in campaign batches. Limited usage events, a daily heartbeat, and latency statistics include install type, uptime, Windows version and architecture, display scale, and role type and count; they exclude prompts, images, role names, local paths, and watch data
 - **Mailbox**: messages are sent only after confirmation. Diagnostics are off by default and limited to the app version, Windows major version, architecture, and up to 5 recent error codes. Only read fingerprints and timestamps are kept locally. Cloud messages are currently not deleted automatically, and deleting local data does not delete messages already sent
 - **Stopping and deleting**: revoke watch consent in Settings to stop capture and delete owner features and evidence. For a full wipe, quit the app and delete `%USERPROFILE%\.moeguard\`; this also removes anonymous account credentials
 

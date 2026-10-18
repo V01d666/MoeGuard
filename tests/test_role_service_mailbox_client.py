@@ -202,7 +202,7 @@ def test_connection_arriving_during_public_refresh_loads_the_authenticated_threa
 
     authenticated = _Transport()
     dialog = MailboxDialog(SlowPublic(), None, MailboxReadStore(tmp_path / "read.json"),
-                           binding_available=True, clock=lambda: 1000)
+                           clock=lambda: 1000)
     dialog.set_connection(authenticated, "test-account")
     assert dialog._refresh_after_connection
     release.set()
@@ -212,7 +212,6 @@ def test_connection_arriving_during_public_refresh_loads_the_authenticated_threa
         time.sleep(.005)
     _wait(dialog)
     assert dialog.inbox.count() == 2 and dialog.tabs.tabText(0).endswith("(2)")
-    assert dialog.bind_button.isHidden()
     dialog.composer.setPlainText("test")
     assert dialog.send_button.isEnabled()
     dialog.close()
@@ -225,7 +224,6 @@ def test_unbound_user_can_read_announcements_without_sending(tmp_path):
         None,
         MailboxReadStore(tmp_path / "read.json"),
         clock=lambda: 1000,
-        binding_available=True,
     )
     _wait(dialog)
     assert dialog.announcements.count() == 1 and dialog.inbox.count() == 0

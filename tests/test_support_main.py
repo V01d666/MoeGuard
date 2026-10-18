@@ -5,18 +5,17 @@ import time
 from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QApplication, QDialog, QLabel, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialog, QLabel, QMessageBox, QPushButton
 
+from moeguard import updater as updater_module
 from moeguard.app import MoeGuardApp
 from moeguard.cloud.role_service_binding import (
-    RoleServiceBindingManager,
-    RoleServiceEnrollmentIdentity,
     RoleServiceEnrollmentStore,
 )
-from moeguard.cloud.role_service_binding_dialog import RoleServiceBindingDialog
 from moeguard.cloud.role_service_http_client import (
     HttpRoleServiceTransport,
     RoleServiceAccountSummary,
+    RoleServiceConnectionError,
     RoleServiceEnrollment,
 )
 from moeguard.cloud.role_service_session import RoleServiceSession, RoleServiceSessionStore
@@ -39,10 +38,20 @@ def _wait_connection(app, qt_app):
     assert not app._service_connection.busy
 
 
-def _automatic_app(tmp_path, monkeypatch, enroll):
+def _automatic_app(tmp_path, monkeypatch, enroll, summary=None):
     from moeguard.config import AppConfig
 
     monkeypatch.setattr(HttpRoleServiceTransport, "enroll", enroll)
+    calls = []
+
+    def account_summary(transport):
+        calls.append(transport._bearer_token)
+        value = summary(len(calls)) if summary is not None else None
+        if isinstance(value, Exception):
+            raise value
+        return value or RoleServiceAccountSummary(5, 0, 1, 2, 3, 0)
+
+    monkeypatch.setattr(HttpRoleServiceTransport, "account_summary", account_summary)
     library = RoleLibrary(tmp_path / "roles")
     monkeypatch.setattr("moeguard.ui.settings_dialog.RoleLibrary", lambda: library)
     sessions = RoleServiceSessionStore(tmp_path / "session.json", _TestProtector())
@@ -53,13 +62,18 @@ def _automatic_app(tmp_path, monkeypatch, enroll):
         app, environ={}, storage_root=tmp_path / "workbench", role_library=library,
         session_store=sessions, enrollment_store=enrollments,
         service_origin="https://roles.example", clock=lambda: 1_900_000_000,
+        watch_network=False,
     )
+    app._summary_calls = calls
     return app, sessions, enrollments
 
 
-def _automatic_enrollment():
+_BALANCE_TEXT = "立绘生成 2 次 · 动作生成 3 次 · 任务占用 0 次 · 已使用 1 次"
+
+
+def _automatic_enrollment(token_char="C"):
     return RoleServiceEnrollment("client-" + "a" * 32,
-                                 "mgr_" + "b" * 24 + "_" + "C" * 43, 2_000_000_000)
+                                 "mgr_" + "b" * 24 + "_" + token_char * 43, 2_000_000_000)
 
 
 def test_startup_connects_off_ui_thread_updates_open_settings_and_reuses_session(
@@ -80,11 +94,11 @@ def test_startup_connects_off_ui_thread_updates_open_settings_and_reuses_session
         lambda *_: delivered_on.append(threading.get_ident())
     )
     app.ready.emit()
-    app._service_connection.connect_now()  # Coalesced with startup.
+    app._service_connection.retry()  # Coalesced with startup.
     app._on_open_settings()
     dialog = app._settings_dialog
     assert app._service_connection.busy
-    assert not dialog.connect_service_button.isEnabled()
+    assert dialog.connect_service_button.isHidden()  # Only shown after a failure.
     assert dialog.support_id_edit.text() == ""
     release.set()
     _wait_connection(app, qt_app)
@@ -93,14 +107,17 @@ def test_startup_connects_off_ui_thread_updates_open_settings_and_reuses_session
     assert dialog.support_id_edit.text() == _automatic_enrollment().account_id
     assert dialog.copy_support_id_button.isEnabled()
     assert dialog.connect_service_button.isHidden()
+    assert "立绘 2 次 · 动作 3 次" in dialog.support_id_edit.placeholderText()
     assert sessions.load() is not None
+    assert len(app._summary_calls) == 1  # Connecting and the balance are one request.
     dialog.reject()
     qt_app.processEvents()
 
     restarted, _, _ = _automatic_app(tmp_path, monkeypatch, enroll)
     restarted.ready.emit()
     _wait_connection(restarted, qt_app)
-    assert len(calls) == 1
+    assert len(calls) == 1  # The stored session is reused; no enrollment.
+    assert len(restarted._summary_calls) == 1
     assert restarted._support_id_provider() == _automatic_enrollment().account_id
 
 
@@ -118,14 +135,16 @@ def test_startup_failure_is_sanitized_and_settings_retry_keeps_identity(
     app, _, _ = _automatic_app(tmp_path, monkeypatch, enroll)
     app.ready.emit()
     _wait_connection(app, qt_app)
+    assert app._service_connection.offline
     app._on_open_settings()
     dialog = app._settings_dialog
     assert "private" not in dialog.support_id_edit.placeholderText()
-    assert dialog.connect_service_button.isEnabled()
+    assert not dialog.connect_service_button.isHidden()
     dialog.connect_service_button.click()
     _wait_connection(app, qt_app)
     assert len(calls) == 2 and calls[0] == calls[1]
     assert dialog.support_id_edit.text() == _automatic_enrollment().account_id
+    assert dialog.connect_service_button.isHidden()
     dialog.reject()
     qt_app.processEvents()
 
@@ -156,7 +175,39 @@ def test_expired_session_recovers_existing_identity_and_closed_settings_are_safe
     assert restarted._service_connection.account_id == previous.account_id
 
 
-def test_explicit_disconnect_stays_disconnected_until_manual_reconnect(
+def test_rejected_token_renews_silently_with_the_same_support_id(
+    tmp_path, qt_app, monkeypatch,
+):
+    from moeguard.cloud.role_service_http_client import RoleServiceHttpError
+
+    enrollments = []
+
+    def enroll(*args):
+        enrollments.append(args)
+        return _automatic_enrollment("C" if len(enrollments) == 1 else "D")
+
+    def summary(call):
+        if call == 2:
+            return RoleServiceHttpError(401, "invalid_token", "private detail")
+        return None
+
+    app, sessions, _ = _automatic_app(tmp_path, monkeypatch, enroll, summary)
+    app.ready.emit()
+    _wait_connection(app, qt_app)
+    first = sessions.load()
+    app._service_connection.invalidate()
+    _wait_connection(app, qt_app)
+
+    renewed = sessions.load()
+    assert len(enrollments) == 2 and enrollments[0] == enrollments[1]
+    assert renewed.account_id == first.account_id
+    assert renewed.bearer_token != first.bearer_token
+    assert app._summary_calls == [first.bearer_token, first.bearer_token,
+                                  renewed.bearer_token]
+    assert not app._service_connection.offline
+
+
+def test_legacy_disconnect_marker_no_longer_keeps_the_user_offline(
     tmp_path, qt_app, monkeypatch,
 ):
     calls = []
@@ -165,25 +216,131 @@ def test_explicit_disconnect_stays_disconnected_until_manual_reconnect(
         calls.append(args)
         return _automatic_enrollment()
 
-    app, _, _ = _automatic_app(tmp_path, monkeypatch, enroll)
+    (tmp_path / "automatic-connection-disabled").write_bytes(b"")
+    app, sessions, _ = _automatic_app(tmp_path, monkeypatch, enroll)
     app.ready.emit()
     _wait_connection(app, qt_app)
-    old_session = app._service_connection.manager.current_session()
-    app._service_connection.manager.unbind()
-    app._service_connection.disconnected()
-    # Late queued completion must not undo disconnect.
-    app._service_connection._complete(old_session)
-    assert app._service_connection.account_id == ""
-    assert app._service_connection.manager.bind_automatically("https://roles.example") is None
-    assert len(calls) == 1
-    restarted, sessions, _ = _automatic_app(tmp_path, monkeypatch, enroll)
-    restarted.ready.emit()
-    assert not restarted._service_connection.busy
-    assert len(calls) == 1 and sessions.load() is None
-    restarted._service_connection.connect_now()
-    _wait_connection(restarted, qt_app)
-    assert len(calls) == 2
-    assert not restarted._service_connection.manager.auto_connect_disabled_path.exists()
+    assert len(calls) == 1 and sessions.load() is not None
+    assert not (tmp_path / "automatic-connection-disabled").exists()
+    assert app._service_connection.account_id == _automatic_enrollment().account_id
+
+
+def test_service_surfaces_share_one_balance_and_refetch_only_when_stale(
+    tmp_path, qt_app, monkeypatch,
+):
+    app, _, _ = _automatic_app(tmp_path, monkeypatch, lambda *_: _automatic_enrollment())
+    connection = app._service_connection
+    now = [1000.0]
+    connection._clock = lambda: now[0]
+    app.ready.emit()
+    _wait_connection(app, qt_app)
+    assert len(app._summary_calls) == 1
+
+    workbench = _factory(app)()
+    credit = _credit_factory(app)()
+    _wait_connection(app, qt_app)
+    assert len(app._summary_calls) == 1  # Fresh cache: opening costs nothing.
+    assert workbench.account_summary_label.text() == _BALANCE_TEXT
+    assert workbench.account_refresh_button.isHidden()
+    assert workbench.support_id_edit.text() == _automatic_enrollment().account_id
+    assert credit.balance_label.text() == _BALANCE_TEXT
+    assert credit.refresh_button.isHidden()
+    workbench.close()
+    credit.close()
+
+    now[0] += 5 * 60
+    reopened = _factory(app)()
+    _wait_connection(app, qt_app)
+    assert len(app._summary_calls) == 2  # Stale after five minutes.
+    reopened.close()
+
+
+def test_workbench_opened_before_startup_finishes_follows_the_connection(
+    tmp_path, qt_app, monkeypatch,
+):
+    release = threading.Event()
+
+    def enroll(*_args):
+        assert release.wait(5)
+        return _automatic_enrollment()
+
+    app, _, _ = _automatic_app(tmp_path, monkeypatch, enroll)
+    app.ready.emit()
+    dialog = _factory(app)()
+    assert dialog.prepare_button.isEnabled()  # Generating connects on demand.
+    assert dialog.account_summary_label.text() == "生成次数：正在获取…"
+    assert dialog.support_id_row.isHidden()
+    release.set()
+    _wait_connection(app, qt_app)
+    assert dialog.account_summary_label.text() == _BALANCE_TEXT
+    assert not dialog.support_id_row.isHidden()
+    assert dialog.support_id_edit.text() == _automatic_enrollment().account_id
+    dialog.close()
+
+
+def test_offline_retry_is_event_driven_and_rate_limited(
+    tmp_path, qt_app, monkeypatch,
+):
+    def enroll(*_args):
+        raise TimeoutError("offline")
+
+    app, _, _ = _automatic_app(tmp_path, monkeypatch, enroll)
+    connection = app._service_connection
+    attempts = []
+    original = connection.transport.account_summary
+    monkeypatch.setattr(
+        connection.transport, "account_summary",
+        lambda: attempts.append(1) or original(),
+    )
+    now = [1000.0]
+    connection._clock = lambda: now[0]
+    connection._retry_timer.stop()
+    app.ready.emit()
+    _wait_connection(app, qt_app)
+    connection._retry_timer.stop()
+    assert connection.offline and len(attempts) == 1
+
+    dialog = _factory(app)()  # Opening a surface retries, at most every 30 s.
+    _wait_connection(app, qt_app)
+    connection._retry_timer.stop()
+    assert len(attempts) == 1
+    assert not dialog.account_refresh_button.isHidden()
+    now[0] += 30
+    dialog.close()
+    dialog = _factory(app)()
+    _wait_connection(app, qt_app)
+    connection._retry_timer.stop()
+    assert len(attempts) == 2
+    dialog.account_refresh_button.click()  # The user's retry is never throttled.
+    _wait_connection(app, qt_app)
+    connection._retry_timer.stop()
+    assert len(attempts) == 3
+    dialog.close()
+
+
+def test_credit_hint_beside_generate_button_names_the_shortfall(
+    tmp_path, qt_app, monkeypatch,
+):
+    app, _, _ = _automatic_app(
+        tmp_path, monkeypatch, lambda *_: _automatic_enrollment(),
+        lambda _call: RoleServiceAccountSummary(1, 0, 0, 1, 0, 0),
+    )
+    app.ready.emit()
+    _wait_connection(app, qt_app)
+    dialog = _factory(app)()
+    dialog.show()
+    qt_app.processEvents()
+    dialog.candidate_count.setValue(2)
+    assert not dialog.credit_hint_row.isHidden()
+    assert dialog.credit_hint_label.text() == "立绘次数不足：需要 2 次，剩 1 次"
+    assert dialog.prepare_button.isEnabled()  # A hint, not a gate.
+    dialog.candidate_count.setValue(1)
+    assert dialog.credit_hint_row.isHidden()
+    dialog.input_tabs.setCurrentIndex(1)  # An uploaded image costs nothing.
+    dialog.candidate_count.setValue(4)
+    assert dialog.credit_hint_row.isHidden()
+    dialog._result_saved = True
+    dialog.close()
 
 
 class _TestProtector:
@@ -280,7 +437,6 @@ def test_support_entry_shows_workbench_without_falling_back_to_fake(
     assert dialog._service_client is None
     assert "离线管理模式" in dialog.mode_hint.text()
     assert dialog.prepare_button.isEnabled() is False
-    assert dialog.bind_service_button is None
     assert "尚未配置生成服务地址" in "".join(
         label.text() for label in dialog.service_bar.findChildren(QLabel)
     )
@@ -435,7 +591,7 @@ def test_support_entry_prefers_os_protected_session_without_environment(
     credit_dialog.close()
 
 
-def test_support_entry_requires_rebind_for_expired_protected_session(
+def test_expired_protected_session_still_opens_an_online_workbench(
     tmp_path: Path, qt_app
 ) -> None:
     app = MoeGuardApp()
@@ -445,21 +601,24 @@ def test_support_entry_requires_rebind_for_expired_protected_session(
         storage_root=tmp_path / "workbench",
         role_library=RoleLibrary(tmp_path / "roles"),
         session_store=_session_store(tmp_path / "session.json", expires_at=100),
+        service_origin="https://roles.example",
         clock=lambda: 101,
+        watch_network=False,
     )
 
     dialog = _factory(app)()
 
+    # The expired token is renewed with the same identity on the first
+    # request; the user is never sent to a "reconnect" step.
     assert isinstance(dialog, RoleWorkbenchDialog)
-    notice = "".join(label.text() for label in dialog.service_bar.findChildren(QLabel))
-    assert "连接已过期" in notice
-    assert "roles.example" not in notice
-    assert dialog.bind_service_button is not None
-    assert dialog.bind_service_button.text() == "连接生成服务"
+    assert dialog.service_bar is None
+    assert dialog._service_client is not None
+    assert dialog.prepare_button.isEnabled() is True
+    assert dialog.support_id_edit.text() == "client-" + "a" * 32
     dialog.close()
 
 
-def test_support_entry_offers_explicit_anonymous_binding_when_origin_is_configured(
+def test_configured_origin_opens_an_online_workbench_without_a_binding_step(
     tmp_path: Path, qt_app
 ) -> None:
     protector = _TestProtector()
@@ -476,15 +635,16 @@ def test_support_entry_offers_explicit_anonymous_binding_when_origin_is_configur
             "MOEGUARD_ROLE_SERVICE_MODE": "https",
             "MOEGUARD_ROLE_SERVICE_URL": "https://roles.example",
         },
+        watch_network=False,
     )
 
     dialog = _factory(app)()
 
     assert isinstance(dialog, RoleWorkbenchDialog)
-    assert dialog._service_client is None
-    assert dialog.bind_service_button is not None
-    assert dialog.bind_service_button.text() == "连接生成服务"
-    assert dialog.prepare_button.isEnabled() is False
+    assert dialog._service_client is not None
+    assert dialog.service_bar is None
+    assert dialog.prepare_button.isEnabled() is True
+    assert dialog.support_id_row.isHidden()  # Until the first request enrolls.
     dialog.close()
 
 
@@ -508,13 +668,15 @@ def test_support_entry_reads_packaged_public_service_origin(
             tmp_path / "enrollment.json", protector
         ),
         service_config_path=config_path,
+        watch_network=False,
     )
 
     dialog = _factory(app)()
 
     assert isinstance(dialog, RoleWorkbenchDialog)
-    assert dialog.bind_service_button is not None
-    assert dialog.prepare_button.isEnabled() is False
+    assert dialog._service_client is not None
+    assert dialog.prepare_button.isEnabled() is True
+    assert dialog._service_transport.service_origin == "https://roles.example"
     dialog.close()
 
 
@@ -574,103 +736,6 @@ def test_accepted_preview_notice_enables_events_for_bound_service_only(
     dialog.close()
 
 
-def test_successful_explicit_binding_refreshes_units_on_reopened_workbench(
-    tmp_path: Path, qt_app, monkeypatch
-) -> None:
-    protector = _TestProtector()
-    session_store = RoleServiceSessionStore(tmp_path / "session.json", protector)
-    enrollment_store = RoleServiceEnrollmentStore(
-        tmp_path / "enrollment.json", protector
-    )
-    app = MoeGuardApp()
-    configure_role_workbench(
-        app,
-        environ={},
-        storage_root=tmp_path / "workbench",
-        role_library=RoleLibrary(tmp_path / "roles"),
-        session_store=session_store,
-        enrollment_store=enrollment_store,
-        service_origin="https://roles.example",
-        clock=lambda: 1_900_000_000,
-    )
-    session = RoleServiceSession(
-        service_origin="https://roles.example",
-        account_id="client-" + "a" * 32,
-        expires_at=2_000_000_000,
-        bearer_token="mgr_" + "b" * 24 + "_" + "C" * 43,
-        enrollment_id="eni_" + "d" * 32,
-        enrollment_secret="ens_" + "E" * 43,
-    )
-
-    def accept_binding(binding_dialog: RoleServiceBindingDialog) -> int:
-        session_store.save(session)
-        binding_dialog.session = session
-        binding_dialog.accept()
-        return QDialog.Accepted
-
-    monkeypatch.setattr(RoleServiceBindingDialog, "exec", accept_binding)
-    monkeypatch.setattr(
-        HttpRoleServiceTransport,
-        "account_summary",
-        lambda _transport: RoleServiceAccountSummary(6, 0, 1, 2, 4, 0),
-    )
-    reopened: list[RoleWorkbenchDialog] = []
-    monkeypatch.setattr(
-        app,
-        "_on_open_custom_role_workbench",
-        lambda: reopened.append(_factory(app)()),
-    )
-
-    offline = _factory(app)()
-    assert offline.bind_service_button is not None
-    offline.bind_service_button.click()
-    for _ in range(4):
-        qt_app.processEvents()
-
-    assert len(reopened) == 1
-    online = reopened[0]
-    # The refresh worker may already have finished inside the processEvents()
-    # loop above, in which case _worker_finished() has reset it to None.  Both
-    # orderings are correct; only the resulting label is a real assertion.
-    worker = online._worker
-    if worker is not None:
-        assert worker.wait(2000)
-    for _ in range(4):
-        qt_app.processEvents()
-
-    assert online.account_summary_label is not None
-    assert online.account_summary_label.text() == (
-        "立绘生成 2 次 · 动作生成 4 次 · 任务占用 0 次 · 已使用 1 次"
-    )
-    online.close()
-
-
-def test_anonymous_binding_dialog_runs_network_exchange_off_the_ui_thread(
-    tmp_path: Path, qt_app
-) -> None:
-    protector = _TestProtector()
-    manager = RoleServiceBindingManager(
-        RoleServiceSessionStore(tmp_path / "session.json", protector),
-        RoleServiceEnrollmentStore(tmp_path / "enrollment.json", protector),
-        enroll=lambda *_args: RoleServiceEnrollment(
-            account_id="client-" + "a" * 32,
-            bearer_token="mgr_" + "b" * 24 + "_" + "C" * 43,
-            expires_at=2_000_000_000,
-        ),
-        clock=lambda: 1_900_000_000,
-    )
-    dialog = RoleServiceBindingDialog(manager, "https://roles.example")
-
-    dialog._start_binding()
-    thread = dialog._thread
-    assert thread is not None
-    assert thread.wait(2000)
-    qt_app.processEvents()
-
-    assert dialog.session is not None
-    assert dialog.result() == QDialog.Accepted
-
-
 def test_online_workbench_refreshes_atomic_generation_units_on_demand(
     tmp_path: Path, qt_app
 ) -> None:
@@ -687,7 +752,6 @@ def test_online_workbench_refreshes_atomic_generation_units_on_demand(
 
     assert dialog.account_summary_label is not None
     assert dialog.account_summary_label.text() == "生成次数：点击刷新"
-    assert dialog.disconnect_service_button is None
     dialog._refresh_account_summary()
     worker = dialog._worker
     assert worker is not None
@@ -700,49 +764,132 @@ def test_online_workbench_refreshes_atomic_generation_units_on_demand(
     dialog.close()
 
 
-def test_online_workbench_can_delete_local_anonymous_binding(
+def test_workbench_and_settings_offer_no_disconnect(
     tmp_path: Path, qt_app, monkeypatch
 ) -> None:
-    protector = _TestProtector()
-    session_store = _session_store(tmp_path / "session.json")
-    enrollment_store = RoleServiceEnrollmentStore(
-        tmp_path / "enrollment.json", protector
+    app, _, enrollments = _automatic_app(
+        tmp_path, monkeypatch, lambda *_: _automatic_enrollment()
     )
-    enrollment_store.save(
-        RoleServiceEnrollmentIdentity(
-            "https://roles.example",
-            "eni_" + "d" * 32,
-            "ens_" + "E" * 43,
+    app.ready.emit()
+    _wait_connection(app, qt_app)
+    dialog = _factory(app)()
+    texts = {button.text() for button in dialog.findChildren(QPushButton)}
+    assert not any("断开" in text for text in texts)
+    assert not hasattr(dialog, "disconnect_service_button")
+    assert enrollments.load() is not None  # The identity is never deleted.
+    dialog.close()
+
+
+def _validate_event(event_name: str, properties: dict[str, object]) -> None:
+    import uuid
+
+    from moeguard.cloud.role_service_event_contract import ClientEvent
+
+    ClientEvent.from_dict(
+        {
+            "event_id": str(uuid.uuid4()),
+            "event_name": event_name,
+            "client_at_ms": 1,
+            "sequence": 0,
+            "session_id": str(uuid.uuid4()),
+            "journey_id": str(uuid.uuid4()),
+            "app_version": "0.4.0",
+            "properties": properties,
+        }
+    )
+
+
+# -- v0.4.0 app heartbeats ----------------------------------------------------
+
+
+class _FakeReporter:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, object]]] = []
+
+    def record(self, event_name: str, *, properties: dict[str, object]) -> bool:
+        _validate_event(event_name, properties)
+        self.events.append((event_name, properties))
+        return True
+
+
+def test_daily_active_is_sent_once_per_day_with_valid_properties(
+    tmp_path, qt_app, monkeypatch
+) -> None:
+    from moeguard.cloud.role_service_client_events import (
+        DailyActiveGate,
+        RequestLatencyBook,
+    )
+    from moeguard.config import AppConfig
+    from moeguard.role_main import AppTelemetry
+
+    app = MoeGuardApp()
+    app._config = AppConfig()
+    reporter = _FakeReporter()
+    today = ["2026-10-18"]
+    gate = DailyActiveGate(tmp_path / "daily.json", today=lambda: today[0])
+    latency = RequestLatencyBook()
+    telemetry = AppTelemetry(
+        app, reporter, gate, latency, role_library=RoleLibrary(tmp_path / "roles")
+    )
+
+    telemetry.start()
+    telemetry.tick()
+    assert [name for name, _p in reporter.events] == ["daily_active"]
+    properties = reporter.events[0][1]
+    assert properties["install_kind"] == "source"
+    assert properties["active_role_kind"] == "builtin"
+    assert properties["custom_role_count"] == 0
+    assert properties["windows_major"] in {"10", "11", "unknown"}
+
+    latency.observe("tasks", 800, ok=True)
+    today[0] = "2026-10-19"
+    telemetry.tick()
+    assert [name for name, _p in reporter.events][1:] == ["daily_active", "network_sample"]
+    telemetry.shutdown()
+    assert len(reporter.events) == 3
+
+
+def test_pilot_build_wires_one_shared_tracker_and_request_timing(
+    tmp_path, qt_app, monkeypatch
+) -> None:
+    from moeguard.cloud import role_service_http_client
+    from moeguard.config import AppConfig
+
+    monkeypatch.setattr(
+        HttpRoleServiceTransport, "submit_client_events", lambda *_a: (_ for _ in ()).throw(
+            RoleServiceConnectionError("service_unreachable")
         )
     )
-    app = MoeGuardApp()
-    configure_role_workbench(
-        app,
-        environ={},
-        storage_root=tmp_path / "workbench",
-        role_library=RoleLibrary(tmp_path / "roles"),
-        session_store=session_store,
-        enrollment_store=enrollment_store,
-        service_origin="https://roles.example",
+    monkeypatch.setattr(role_service_http_client, "_request_observer", None)
+    monkeypatch.setattr(updater_module, "_feed_observer", None)
+    from moeguard.cloud.role_service_client_events import (
+        ClientEventOutboxStore,
+        PreviewClientEventTracker,
+    )
+
+    library = RoleLibrary(tmp_path / "roles")
+    outbox = tmp_path / "workbench" / "state" / "client-events.json"
+    tracker = PreviewClientEventTracker(
+        ClientEventOutboxStore(outbox, protector=_TestProtector()),
+        app_version="0.4.0",
+        enabled=True,
         clock=lambda: 1_900_000_000,
     )
-    reopened: list[bool] = []
-    monkeypatch.setattr(
-        app, "_on_open_custom_role_workbench", lambda: reopened.append(True)
+    app = MoeGuardApp()
+    app._config = AppConfig()
+    configure_role_workbench(
+        app, environ={}, storage_root=tmp_path / "workbench", role_library=library,
+        session_store=RoleServiceSessionStore(tmp_path / "s.json", _TestProtector()),
+        enrollment_store=RoleServiceEnrollmentStore(tmp_path / "e.json", _TestProtector()),
+        service_origin="https://roles.example", clock=lambda: 1_900_000_000,
+        watch_network=False, pilot_notice_enabled=True, client_event_tracker=tracker,
     )
-    monkeypatch.setattr(QMessageBox, "warning", lambda *_args: QMessageBox.Yes)
-
-    dialog = _factory(app)()
-
-    assert dialog.disconnect_service_button is not None
-    dialog.disconnect_service_button.click()
-    qt_app.processEvents()
-
-    assert session_store.load() is None
-    assert enrollment_store.load() is None
-    assert reopened == [True]
-
-    offline = _factory(app)()
-    assert offline.bind_service_button is not None
-    assert offline.prepare_button.isEnabled() is False
-    offline.close()
+    telemetry = app._telemetry
+    assert telemetry is not None
+    assert role_service_http_client._request_observer == telemetry.latency.observe
+    assert updater_module._feed_observer == telemetry.latency.observe
+    assert telemetry.reporter.tracker is tracker
+    assert telemetry.record_daily_active() is True
+    assert outbox.exists()  # Undelivered events wait in the shared outbox.
+    assert (tmp_path / "workbench" / "state" / "daily-active.json").exists()
+    telemetry.shutdown()

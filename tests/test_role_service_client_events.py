@@ -252,3 +252,79 @@ def test_reporter_failure_never_raises_and_retains_outbox(tmp_path: Path) -> Non
     )
     assert reporter.wait_for_idle()
     assert tracker.outbox.pending_count() == 1
+
+
+def _validate_event(event_name: str, properties: dict[str, object]) -> None:
+    import uuid
+
+    from moeguard.cloud.role_service_event_contract import ClientEvent
+
+    ClientEvent.from_dict(
+        {
+            "event_id": str(uuid.uuid4()),
+            "event_name": event_name,
+            "client_at_ms": 1,
+            "sequence": 0,
+            "session_id": str(uuid.uuid4()),
+            "journey_id": str(uuid.uuid4()),
+            "app_version": "0.4.0",
+            "properties": properties,
+        }
+    )
+
+
+# -- v0.4.0 heartbeats --------------------------------------------------------
+
+
+def test_latency_book_reports_percentiles_per_route_and_resets() -> None:
+    from moeguard.cloud.role_service_client_events import RequestLatencyBook
+
+    book = RequestLatencyBook()
+    for value in range(1, 11):
+        book.observe("account", value * 100, ok=value != 10)
+    book.observe("results", 5_000, ok=True)
+    book.observe("nope", 1, ok=True)
+
+    samples = {sample["latency_route"]: sample for sample in book.drain()}
+    assert set(samples) == {"account", "results"}
+    account = samples["account"]
+    assert account["sample_count"] == 10
+    assert account["failure_count"] == 1
+    assert account["latency_p50_ms"] == 500
+    assert account["latency_p90_ms"] == 900
+    for sample in samples.values():
+        _validate_event("network_sample", sample)
+    assert book.drain() == ()
+
+
+def test_latency_book_does_not_report_its_own_delivery_alone() -> None:
+    from moeguard.cloud.role_service_client_events import RequestLatencyBook
+
+    book = RequestLatencyBook()
+    book.observe("events", 120, ok=True)
+    assert book.drain() == ()
+    book.observe("events", 120, ok=True)
+    book.observe("updates", 300, ok=False)
+    assert [s["latency_route"] for s in book.drain()] == ["events", "updates"]
+
+
+def test_daily_active_gate_survives_restarts_and_broken_files(tmp_path: Path) -> None:
+    from moeguard.cloud.role_service_client_events import DailyActiveGate
+
+    today = ["2026-10-18"]
+    path = tmp_path / "state" / "daily-active.json"
+    gate = DailyActiveGate(path, today=lambda: today[0])
+    assert gate.due()
+    gate.mark()
+    assert not gate.due()
+    assert not DailyActiveGate(path, today=lambda: today[0]).due()
+    today[0] = "2026-10-19"
+    assert gate.due()
+
+    path.write_text("not json", encoding="utf-8")
+    assert DailyActiveGate(path, today=lambda: today[0]).due()
+    blocked = tmp_path / "file"
+    blocked.write_text("x", encoding="utf-8")
+    memory_only = DailyActiveGate(blocked / "daily.json", today=lambda: today[0])
+    memory_only.mark()  # Unwritable: never raises, remembers in memory.
+    assert not memory_only.due()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import os
 import threading
 import time
@@ -301,6 +302,118 @@ class ClientEventOutboxStore:
                     self._now_ms() + delay,
                 )
             )
+
+
+LATENCY_SAMPLE_ROUTES = ("account", "tasks", "assets", "results", "events", "updates")
+_MAX_LATENCY_SAMPLES_PER_ROUTE = 2_000
+_MAX_LATENCY_MS = 600_000
+
+
+def _nearest_rank(sorted_values: list[int], fraction: float) -> int:
+    rank = max(1, math.ceil(fraction * len(sorted_values)))
+    return sorted_values[min(rank, len(sorted_values)) - 1]
+
+
+class RequestLatencyBook:
+    """Thread-safe per-route request durations between two ``network_sample``s.
+
+    Requests run on worker threads; the GUI thread drains the book on a timer
+    and at exit. Only durations, outcomes and the route family are kept --
+    never a URL, task ID or payload.
+    """
+
+    def __init__(self, *, max_samples_per_route: int = _MAX_LATENCY_SAMPLES_PER_ROUTE) -> None:
+        self._lock = threading.Lock()
+        self._max = max(1, max_samples_per_route)
+        self._samples: dict[str, list[tuple[int, bool]]] = {}
+
+    def observe(self, route: str, duration_ms: int, ok: bool) -> None:
+        if route not in LATENCY_SAMPLE_ROUTES:
+            return
+        value = max(0, min(_MAX_LATENCY_MS, int(duration_ms)))
+        with self._lock:
+            bucket = self._samples.setdefault(route, [])
+            if len(bucket) < self._max:
+                bucket.append((value, bool(ok)))
+
+    def drain(self) -> tuple[dict[str, object], ...]:
+        """Return one ``network_sample`` property set per route, then reset.
+
+        Delivering samples is itself an ``events`` request, so an ``events``
+        sample is reported only alongside activity on another route; on its
+        own it would keep an idle client sending one sample every period.
+        """
+
+        with self._lock:
+            samples, self._samples = self._samples, {}
+        if not any(route != "events" for route in samples):
+            return ()
+        result: list[dict[str, object]] = []
+        for route in LATENCY_SAMPLE_ROUTES:
+            bucket = samples.get(route)
+            if not bucket:
+                continue
+            durations = sorted(duration for duration, _ok in bucket)
+            properties: dict[str, object] = {
+                "latency_route": route,
+                "sample_count": len(bucket),
+                "failure_count": sum(1 for _duration, ok in bucket if not ok),
+                "latency_p50_ms": _nearest_rank(durations, 0.5),
+                "latency_p90_ms": _nearest_rank(durations, 0.9),
+            }
+            result.append(properties)
+        return tuple(result)
+
+
+class DailyActiveGate:
+    """Remember the last local day a ``daily_active`` heartbeat was recorded.
+
+    The file holds only a date. A broken or unwritable file never blocks the
+    app: the gate then falls back to memory for the rest of the process.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        today: Callable[[], str] = lambda: time.strftime("%Y-%m-%d"),
+    ) -> None:
+        self.path = Path(path)
+        self._today = today
+        self._last: str | None = None
+        self._lock = threading.Lock()
+
+    def _stored(self) -> str:
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        if not isinstance(raw, dict) or raw.get("schema_version") != 1:
+            return ""
+        value = raw.get("last_local_date")
+        return value if isinstance(value, str) else ""
+
+    def due(self) -> bool:
+        with self._lock:
+            if self._last is None:
+                self._last = self._stored()
+            return self._last != self._today()
+
+    def mark(self) -> None:
+        with self._lock:
+            today = self._today()
+            self._last = today
+            payload = json.dumps({"schema_version": 1, "last_local_date": today}) + "\n"
+            temporary = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                temporary.write_text(payload, encoding="utf-8")
+                os.replace(temporary, self.path)
+            except OSError:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
 
 class PreviewClientEventTracker:

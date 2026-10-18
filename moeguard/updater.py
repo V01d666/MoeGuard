@@ -32,6 +32,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -180,7 +181,62 @@ def run_velopack_startup(
         # must still start.
         logger.warning("Velopack startup skipped", exc_info=True)
         return False
+    global _velopack_started
+    _velopack_started = True
     return True
+
+
+# Whether ``run_velopack_startup`` handed this process to Velopack (telemetry).
+_velopack_started = False
+
+
+def install_kind(
+    *,
+    frozen: bool | None = None,
+    executable: str | None = None,
+    local_appdata: str | None = None,
+) -> str:
+    """How the running copy was installed, for the ``daily_active`` heartbeat.
+
+    The Setup.exe install lives under ``%LOCALAPPDATA%`` and runs through
+    Velopack; a ZIP extracted anywhere else is portable. Source runs are
+    ``source``. Anything unexpected reports ``unknown`` rather than guessing.
+    """
+
+    try:
+        if not (getattr(sys, "frozen", False) if frozen is None else frozen):
+            return "source"
+        base = os.environ.get("LOCALAPPDATA", "") if local_appdata is None else local_appdata
+        if _velopack_started and base:
+            exe = Path(executable or sys.executable).resolve()
+            try:
+                exe.relative_to(Path(base).resolve())
+                return "installed"
+            except ValueError:
+                pass
+        return "portable"
+    except (OSError, RuntimeError, ValueError):
+        return "unknown"
+
+
+# -- feed latency (v0.4.0 ``network_sample``, route ``updates``) -------------
+FeedObserver = Callable[[str, int, bool], None]
+_feed_observer: FeedObserver | None = None
+
+
+def set_feed_observer(observer: FeedObserver | None) -> None:
+    global _feed_observer
+    _feed_observer = observer
+
+
+def _observe_feed(started: float, ok: bool) -> None:
+    observer = _feed_observer
+    if observer is None:
+        return
+    try:
+        observer("updates", int((time.monotonic() - started) * 1000), ok)
+    except Exception:  # noqa: BLE001 - telemetry never affects an update check
+        pass
 
 
 # -- feed and transfer ------------------------------------------------------
@@ -240,14 +296,19 @@ def fetch_feed_bytes(
     request = urllib.request.Request(
         _url(source, name), method="GET", headers={"User-Agent": USER_AGENT}
     )
+    started = time.monotonic()
     try:
         with (opener or _default_opener()).open(request, timeout=20) as response:
-            return _read_limited(response, MAX_FEED_BYTES)
+            data = _read_limited(response, MAX_FEED_BYTES)
+        _observe_feed(started, True)
+        return data
     except urllib.error.HTTPError as exc:
+        _observe_feed(started, exc.code < 500)
         raise UpdateError(
             "update feed is unreachable", retryable=exc.code == 429 or exc.code >= 500
         ) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        _observe_feed(started, False)
         raise UpdateError("update feed is unreachable", retryable=True) from exc
 
 

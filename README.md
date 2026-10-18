@@ -58,7 +58,7 @@
 
 | 🐙 GitHub Releases | 🌐 官网直链 | ☁️ 百度网盘 |
 | :---: | :---: | :---: |
-| [GitHub 稳定安装版](https://github.com/V01d666/MoeGuard/releases/latest/download/MoeGuard-Setup.exe) | [官网安装包直链](https://api.moeproject.net/updates/windows/stable/MoeGuard-Setup.exe) | [百度网盘下载](https://pan.baidu.com/s/1NwsshuNjPHxKpGryjyR5ZA?pwd=moeg) |
+| [GitHub 稳定安装版](https://github.com/V01d666/MoeGuard/releases/latest/download/MoeGuard-Setup.exe) | [官网安装包直链](https://api.moeproject.net/updates/windows/stable/MoeGuard-Setup.exe) | [百度网盘下载](https://pan.baidu.com/s/1K_EUUpXF-CR2h0dJ_Dlr7g?pwd=moeg) |
 
 只养桌宠用不到摄像头。第一次启动会讲清楚值守的风险，你可以只养桌宠，看家功能随时再到设置里开启
 
@@ -71,17 +71,17 @@
 
 | 🐙 GitHub Releases | 🌐 官网直链 | ☁️ 百度网盘 |
 | :---: | :---: | :---: |
-| [GitHub 免安装 ZIP](https://github.com/V01d666/MoeGuard/releases/download/v0.3.0/MoeGuard-0.3.0-win-Portable.zip) | [官网免安装 ZIP 直链](https://api.moeproject.net/updates/windows/stable/MoeGuard-Portable.zip) | [百度网盘免安装版](https://pan.baidu.com/s/1OqRQ_peEx4zJvMvgOC858g?pwd=moeg) |
+| [GitHub 免安装 ZIP](https://github.com/V01d666/MoeGuard/releases/download/v0.4.0/MoeGuard-0.4.0-win-Portable.zip) | [官网免安装 ZIP 直链](https://api.moeproject.net/updates/windows/stable/MoeGuard-Portable.zip) | [百度网盘免安装版](https://pan.baidu.com/s/1089PgfbfbggP7I0Ld2wDFQ?pwd=moeg) |
 
 </details>
 
 <details>
-<summary>🔎 文件校验（v0.3.0）</summary>
+<summary>🔎 文件校验（v0.4.0）</summary>
 
 | 文件 | 字节数 | SHA-256 |
 | --- | ---: | --- |
-| `MoeGuard-Setup.exe` | 206563726 | `21c09e08994bdd49b1d036922ddd4f6b08ef98244df66697ee30c594345de4ec` |
-| `MoeGuard-0.3.0-win-Portable.zip` | 198837243 | `98a20f5d676c3b8d4da6250a3baeb20485a45c5f5501fc0b5faefcc4a2590cf2` |
+| `MoeGuard-Setup.exe` | 206577756 | `316cde63faed3e4f10b3860d06a2c73a49543aa0e4f44c87e62a573010c16b96` |
+| `MoeGuard-0.4.0-win-Portable.zip` | 198851273 | `0047bf7c83b24d41b342ba0dc74e78637112326c04c156147673f4d7dd127dd4` |
 
 </details>
 
@@ -106,6 +106,7 @@ py -3.12 -m venv .venv
 
 ## 项目时间线
 
+- [2026/10/18] 🎉 [MoeGuard v0.4.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.0) 正式发布！服务连接与生成次数自动刷新，次数不足提示更清楚，升级后保留原支持编号
 - [2026/10/08] 🎉 [MoeGuard v0.3.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.3.0) 正式发布！安装版支持原地更新，新增内置信箱与支持编号，设置页也能查看当前版本
 - [2026/09/24] 🎉 [MoeGuard v0.2.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0) 正式发布！桌宠工坊总算是能上桌了，还带来了生成进度与预计等待、完成提醒，以及角色导出和导入
 - [2026/09/01] 🧪 [v0.2.0 Preview](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0-preview) 开启限量内测，桌宠工坊第一次交到大家手上，详见[爱发电内测公告](https://ifdian.net/p/d2c072d4a61d11f1bd1c5254001e7c00)
@@ -130,8 +131,8 @@ py -3.12 -m venv .venv
 <summary>🔒 摄像头、云端生成与数据处理说明</summary>
 
 - **摄像头**：只在主人注册和值守时开启；人脸特征、画面和证据留在本机，值守证据默认保留 7 天
-- **联网与更新**：启动时建立或复用匿名服务凭据和支持编号；连接失败仍能养桌宠。更新请求不携带账号凭据或 Cookie
-- **云端生成**：主动生成时上传文字、参考图和任务素材，服务端按活动批次清理；另有少量使用事件，不含提示词、图片、本机路径或值守数据
+- **联网与更新**：启动时建立或复用匿名服务凭据和支持编号，网络恢复后自动重连；连接失败仍能养桌宠。更新请求不携带账号凭据或 Cookie
+- **云端生成**：主动生成时上传文字、参考图和任务素材，服务端按活动批次清理；另有少量使用事件、每日在线心跳和网络耗时统计（安装方式、运行时长、Windows 版本与架构、缩放、角色类型与数量），不含提示词、图片、角色名、本机路径或值守数据
 - **信箱**：确认后才发送留言，诊断默认关闭，仅可附应用版本、Windows 主版本、架构和最近最多 5 个错误码。本机仅保留已读指纹与时间；云端留言目前不会自动删除，删除本机数据也不会删除已发送的留言
 - **停止与删除**：设置里撤回值守同意会停止采集并删除主人特征和证据；完整清除可在退出后删除 `%USERPROFILE%\.moeguard\`，同时会丢失匿名账号凭据
 

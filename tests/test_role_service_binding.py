@@ -117,18 +117,45 @@ def test_binding_reuses_active_session_without_network(tmp_path: Path) -> None:
     assert calls == 1
 
 
-def test_binding_unbind_removes_session_and_recovery_identity(tmp_path: Path) -> None:
-    manager, enrollment_store, session_store = _manager(
-        tmp_path,
-        lambda *_args: _enrollment(),
-    )
-    manager.bind("https://roles.example")
+def test_renew_replaces_a_rejected_token_once_and_keeps_the_identity(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[str, str, str]] = []
 
-    manager.unbind()
-    manager.unbind()
+    def enroll(origin: str, enrollment_id: str, enrollment_secret: str):
+        calls.append((origin, enrollment_id, enrollment_secret))
+        return RoleServiceEnrollment(
+            account_id="client-" + "a" * 32,
+            bearer_token="mgr_" + "b" * 24 + "_" + "CD"[len(calls) - 1] * 43,
+            expires_at=2_000_000_000,
+        )
 
-    assert enrollment_store.load() is None
-    assert session_store.load() is None
+    manager, enrollment_store, session_store = _manager(tmp_path, enroll)
+    first = manager.bind("https://roles.example")
+    renewed = manager.renew("https://roles.example", first.bearer_token)
+    # A second caller holding the same rejected token reuses the renewal.
+    again = manager.renew("https://roles.example", first.bearer_token)
+
+    assert len(calls) == 2 and calls[0] == calls[1]
+    assert renewed.account_id == first.account_id
+    assert again == session_store.load()
+    assert enrollment_store.load() is not None
+
+
+def test_lost_enrollment_file_is_recovered_from_the_session(tmp_path: Path) -> None:
+    calls: list[tuple[str, str, str]] = []
+
+    def enroll(origin: str, enrollment_id: str, enrollment_secret: str):
+        calls.append((origin, enrollment_id, enrollment_secret))
+        return _enrollment()
+
+    manager, enrollment_store, session_store = _manager(tmp_path, enroll)
+    first = manager.bind("https://roles.example")
+    enrollment_store.delete()
+    manager.renew("https://roles.example", first.bearer_token)
+
+    assert calls[0] == calls[1]  # Same identity, so the same support ID.
+    assert enrollment_store.load() is not None
 
 
 def test_explicit_rebind_discards_only_a_corrupt_short_lived_session(

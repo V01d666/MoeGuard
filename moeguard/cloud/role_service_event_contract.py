@@ -51,8 +51,16 @@ _CLIENT_ERROR_CODES = frozenset(
         "provider_technical_failure",
         "task_failed",
         "task_not_found",
+        # v0.4.0+: split out of request_rejected so "no credits left" is
+        # countable from telemetry alone.
+        "insufficient_units",
     }
 )
+# v0.4.0+: how the running copy was installed, and what is on the desktop.
+_INSTALL_KINDS = frozenset({"installed", "portable", "source", "unknown"})
+_ROLE_KINDS = frozenset({"builtin", "custom", "none"})
+# v0.4.0+: which request family a latency sample belongs to.
+_LATENCY_ROUTES = frozenset({"account", "tasks", "assets", "results", "events", "updates"})
 
 _PROPERTY_LIMITS = {
     "candidate_count": (1, 4),
@@ -62,6 +70,14 @@ _PROPERTY_LIMITS = {
     "retry_count": (0, 1000),
     "bytes_received": (0, 512 * 1024 * 1024),
     "display_scale_percent": (50, 400),
+    # v0.4.0+ daily heartbeat and latency samples.  Bounds are generous but
+    # finite so a corrupt client can never write an unbounded integer.
+    "custom_role_count": (0, 1000),
+    "uptime_minutes": (0, 7 * 24 * 60),
+    "sample_count": (1, 10_000),
+    "failure_count": (0, 10_000),
+    "latency_p50_ms": (0, 600_000),
+    "latency_p90_ms": (0, 600_000),
 }
 
 _COMMON_CONTEXT = frozenset({"screen", "stage", "entrypoint", "operation"})
@@ -137,6 +153,28 @@ _EVENT_RULES = {
     "client_error_shown": _rule(
         "reason", "error_code", "retry_count", required=("error_code",)
     ),
+    # -- v0.4.0+ (server accepts first; v0.3.x clients never send these) ------
+    # At most one per local day: answers "is the pet still on the desktop".
+    "daily_active": _rule(
+        *_RUNTIME_CONTEXT,
+        "install_kind",
+        "active_role_kind",
+        "custom_role_count",
+        "uptime_minutes",
+        required=("install_kind", "active_role_kind"),
+    ),
+    # A preview was closed without installing: the silent drop-off.
+    "preview_dismissed": _rule("duration_ms", "package_ready"),
+    # Aggregated client-measured latency per request family since the last
+    # sample, to compare carriers and regions.
+    "network_sample": _rule(
+        "latency_route",
+        "sample_count",
+        "failure_count",
+        "latency_p50_ms",
+        "latency_p90_ms",
+        required=("latency_route", "sample_count", "latency_p50_ms"),
+    ),
 }
 
 
@@ -181,6 +219,12 @@ def _property_value(name: str, value: Any) -> object:
         return _enum(value, name, _INTERRUPT_REASONS)
     if name == "error_code":
         return _enum(value, name, _CLIENT_ERROR_CODES)
+    if name == "install_kind":
+        return _enum(value, name, _INSTALL_KINDS)
+    if name == "active_role_kind":
+        return _enum(value, name, _ROLE_KINDS)
+    if name == "latency_route":
+        return _enum(value, name, _LATENCY_ROUTES)
     if name == "windows_major":
         return _enum(value, name, frozenset({"10", "11", "unknown"}))
     if name == "architecture":

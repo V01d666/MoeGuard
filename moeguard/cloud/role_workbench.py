@@ -23,7 +23,7 @@ from typing import Any, Protocol
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from PIL import Image
-from PySide6.QtCore import QSettings, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QSettings, QSize, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QHideEvent, QIcon, QMovie, QPixmap, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -153,6 +153,13 @@ _SERVICE_POLL_SCHEDULE = ((15.0, 1.0), (90.0, 3.0))
 _SERVICE_POLL_MAX_SECONDS = 5.0
 # Error codes that mean "the link failed", not "the task failed". The service
 # task keeps running, so these are reported as an interruption to resume.
+def _is_insufficient_units(error: object) -> bool:
+    return isinstance(error, RoleServiceHttpError) and (
+        error.status == 402
+        or error.code in {"insufficient_units", "insufficient_t2i_units", "insufficient_i2v_units"}
+    )
+
+
 _NETWORK_ERROR_CODES = frozenset(
     {"service_timeout", "network_unavailable", "service_unavailable"}
 )
@@ -286,6 +293,15 @@ def _account_summary_text(value: RoleServiceAccountSummary) -> str:
     )
 
 
+# Formerly shown by the one-time "connect" dialog, which no longer exists now
+# that connecting is automatic; the support ID is where users meet the account.
+_SUPPORT_ID_TOOLTIP = (
+    "这台电脑的匿名支持编号，反馈问题时提供它即可。"
+    "账号随机生成，不需要邮箱，也不读取硬件序列号；"
+    "凭据仅以 Windows 当前用户保护的形式保存在本机。"
+)
+
+
 def _support_id_row(
     account_id: str,
     parent: QWidget,
@@ -302,13 +318,13 @@ def _support_id_row(
     value = QLineEdit(account_id)
     value.setReadOnly(True)
     value.setAccessibleName("支持编号")
-    value.setToolTip("这是匿名账号的完整支持编号，不包含生成服务凭据。")
+    value.setToolTip(_SUPPORT_ID_TOOLTIP)
     copy_button = QPushButton("复制编号")
     copy_button.setAccessibleName("复制支持编号")
     copy_button.setToolTip("复制完整支持编号，反馈问题时可直接粘贴。")
 
     def copy_account_id() -> None:
-        QApplication.clipboard().setText(account_id)
+        QApplication.clipboard().setText(value.text())
         copy_button.setText("已复制")
 
     copy_button.clicked.connect(copy_account_id)
@@ -316,6 +332,26 @@ def _support_id_row(
     layout.addWidget(value, 1)
     layout.addWidget(copy_button)
     return row, value, copy_button
+
+
+def _show_support_id(owner: QWidget, account_id: str) -> None:
+    """Fill a support-ID row created before the device session was known."""
+    row = getattr(owner, "support_id_row", None)
+    edit = getattr(owner, "support_id_edit", None)
+    if row is None or edit is None or not account_id:
+        return
+    owner._account_id = account_id
+    if edit.text() != account_id:
+        edit.setText(account_id)
+    row.setVisible(True)
+
+
+def _connection_balance_text(connection: Any) -> str:
+    if connection.offline:
+        return f"生成次数：{connection.status}"
+    if connection.summary is not None:
+        return _account_summary_text(connection.summary)
+    return "生成次数：正在获取…"
 
 
 def _client_runtime_info() -> ClientRuntimeInfo:
@@ -1207,11 +1243,13 @@ class RoleCreditDialog(QDialog):
         *,
         unavailable_message: str = "",
         account_id: str = "",
+        connection: Any | None = None,
     ) -> None:
         super().__init__(parent)
         self._service_transport = service_transport
         self._account_id = account_id.strip()
         self._worker: _BackendWorker | None = None
+        self._connection = connection if service_transport is not None else None
         self.redeemed_successfully = False
 
         self.setObjectName("roleCreditDialog")
@@ -1236,12 +1274,13 @@ class RoleCreditDialog(QDialog):
         self.support_id_row: QWidget | None = None
         self.support_id_edit: QLineEdit | None = None
         self.copy_support_id_button: QPushButton | None = None
-        if self._account_id:
+        if self._account_id or self._connection is not None:
             (
                 self.support_id_row,
                 self.support_id_edit,
                 self.copy_support_id_button,
             ) = _support_id_row(self._account_id, self)
+            self.support_id_row.setVisible(bool(self._account_id))
             content.addWidget(self.support_id_row)
 
         balance_row = QHBoxLayout()
@@ -1257,6 +1296,11 @@ class RoleCreditDialog(QDialog):
         balance_row.addWidget(self.balance_label, 1)
         balance_row.addWidget(self.refresh_button)
         content.addLayout(balance_row)
+        if self._connection is not None:
+            # The shared connection fetches the balance by itself; the button
+            # only exists to retry after the automatic attempts failed.
+            self.refresh_button.setText("重试连接")
+            self._connection.changed.connect(self._sync_connection)
 
         redeem_row = QHBoxLayout()
         self.code_edit = QLineEdit()
@@ -1289,6 +1333,20 @@ class RoleCreditDialog(QDialog):
             available
             and callable(getattr(service_transport, "redeem_credit_code", None))
         )
+        if self._connection is not None:
+            self._sync_connection()
+            self._connection.ensure_fresh()
+
+    @Slot(str, str, bool)
+    def _sync_connection(
+        self, _account_id: str = "", _status: str = "", _offline: bool = False
+    ) -> None:
+        connection = self._connection
+        if connection is None:
+            return
+        self.balance_label.setText(_connection_balance_text(connection))
+        _show_support_id(self, connection.account_id)
+        self.refresh_button.setVisible(connection.offline)
 
     def _set_busy(self, busy: bool) -> None:
         available = self._service_transport is not None
@@ -1319,6 +1377,9 @@ class RoleCreditDialog(QDialog):
         worker.start()
 
     def _refresh(self, _checked: bool = False) -> None:
+        if self._connection is not None:
+            self._connection.retry()
+            return
         query = getattr(self._service_transport, "account_summary", None)
         if not callable(query):
             return
@@ -1342,6 +1403,8 @@ class RoleCreditDialog(QDialog):
             self.code_edit.clear()
             self.redeemed_successfully = True
             self.status_label.setText("兑换成功，生成次数已经到账。")
+            if self._connection is not None:
+                self._connection.adopt_summary(value)
             self.redeemed.emit()
 
         self._start(lambda _progress: redeem(code), success)
@@ -1376,8 +1439,6 @@ class RoleWorkbenchDialog(QDialog):
     """One-window workbench for creating and revising managed roles."""
 
     install_requested = Signal(object)
-    binding_requested = Signal()
-    unbinding_requested = Signal()
     # Emitted from the worker thread when a task is accepted by the service.
     # A bubble is a widget, so it must be built on the UI thread; a direct
     # call from the worker would be a cross-thread widget construction.
@@ -1395,17 +1456,23 @@ class RoleWorkbenchDialog(QDialog):
         local_service_executor: Callable[..., None] | None = None,
         generation_available: bool = True,
         generation_unavailable_message: str = "",
-        binding_available: bool = False,
-        service_unbinding_available: bool = False,
         client_events: ClientEventReporter | None = None,
         client_event_entrypoint: str = "settings",
         account_id: str = "",
         notify_user: Callable[[str, str], None] | None = None,
         announce_wait: Callable[[str], None] | None = None,
+        connection: Any | None = None,
     ) -> None:
         super().__init__(parent)
         self._backend = backend
         self._account_id = account_id.strip()
+        # The app-wide service connection (role_service_connection): it owns
+        # the balance and the link state, so this dialog never asks the user
+        # to connect or to refresh.
+        self._connection = connection if service_transport is not None else None
+        # Set when the service refused for credits: resuming would repeat the
+        # same refusal, so the button waits for a redeem (C1).
+        self._resume_needs_credits = False
         # Generation takes minutes the service cannot shorten, so the wait is
         # worth more spent elsewhere. Calling the user back is what makes
         # leaving safe; without it, looking away means missing the result.
@@ -1461,6 +1528,10 @@ class RoleWorkbenchDialog(QDialog):
         self._client_event_retry_count = 0
         self._client_event_recovery_task_id = ""
         self._last_installed_remote_task_id = ""
+        # Set when a package preview becomes ready, cleared once it is installed;
+        # leaving while set records ``preview_dismissed`` (v0.4.0).
+        self._preview_shown_at: float | None = None
+        self._preview_task_id = ""
         self._client_event_home_visible = False
         self._settings = QSettings("MoeGuard", "CustomRoleDemo")
         task_state_root = backend.storage_root / "state"
@@ -1484,8 +1555,6 @@ class RoleWorkbenchDialog(QDialog):
             generation_unavailable_message.strip()
             or "连接桌宠生成服务后即可生成新形象和动作。"
         )
-        self._binding_available = bool(binding_available)
-        self._service_unbinding_available = bool(service_unbinding_available)
         self._service_client = (
             RoleServiceClient(
                 service_transport,
@@ -1530,7 +1599,6 @@ class RoleWorkbenchDialog(QDialog):
         root.addWidget(self.mode_hint)
 
         self.service_bar: QWidget | None = None
-        self.bind_service_button: QPushButton | None = None
         if not self._generation_available:
             self.service_bar = QFrame()
             self.service_bar.setObjectName("roleServiceNotice")
@@ -1542,37 +1610,40 @@ class RoleWorkbenchDialog(QDialog):
             service_notice.setWordWrap(True)
             service_notice.setProperty("role", "hint")
             service_layout.addWidget(service_notice, 1)
-            if self._binding_available:
-                self.bind_service_button = QPushButton("连接生成服务")
-                self.bind_service_button.setStyleSheet(theme.button_qss("accent"))
-                self.bind_service_button.clicked.connect(self.binding_requested.emit)
-                service_layout.addWidget(self.bind_service_button)
             root.addWidget(self.service_bar)
 
         self.support_id_row: QWidget | None = None
         self.support_id_edit: QLineEdit | None = None
         self.copy_support_id_button: QPushButton | None = None
-        if self._account_id:
+        if self._account_id or self._connection is not None:
             (
                 self.support_id_row,
                 self.support_id_edit,
                 self.copy_support_id_button,
             ) = _support_id_row(self._account_id, self)
+            self.support_id_row.setVisible(bool(self._account_id))
             root.addWidget(self.support_id_row)
 
         self.account_bar: QWidget | None = None
         self.account_summary_label: QLabel | None = None
         self.account_refresh_button: QPushButton | None = None
         self.redeem_credit_button: QPushButton | None = None
-        self.disconnect_service_button: QPushButton | None = None
         if callable(getattr(service_transport, "account_summary", None)):
             self.account_bar = QWidget()
             account_layout = QHBoxLayout(self.account_bar)
             account_layout.setContentsMargins(0, 0, 0, 0)
             account_layout.setSpacing(8)
-            self.account_summary_label = QLabel("生成次数：点击刷新")
+            self.account_summary_label = QLabel(
+                "生成次数：正在获取…"
+                if self._connection is not None
+                else "生成次数：点击刷新"
+            )
             self.account_summary_label.setProperty("role", "hint")
-            self.account_refresh_button = QPushButton("刷新次数")
+            # With the shared connection the balance arrives by itself and
+            # this button only appears after automatic attempts failed.
+            self.account_refresh_button = QPushButton(
+                "重试连接" if self._connection is not None else "刷新次数"
+            )
             self.account_refresh_button.clicked.connect(
                 self._refresh_account_summary
             )
@@ -1586,15 +1657,6 @@ class RoleWorkbenchDialog(QDialog):
                 self.redeem_credit_button.clicked.connect(self._open_credit_dialog)
                 account_layout.addWidget(self.redeem_credit_button)
             account_layout.addWidget(self.account_refresh_button)
-            if self._service_unbinding_available:
-                self.disconnect_service_button = QPushButton("断开服务")
-                self.disconnect_service_button.setToolTip(
-                    "删除这台电脑保存的匿名连接凭据"
-                )
-                self.disconnect_service_button.clicked.connect(
-                    self._request_service_unbinding
-                )
-                account_layout.addWidget(self.disconnect_service_button)
             root.addWidget(self.account_bar)
 
         self._ui_stage = 1
@@ -1855,6 +1917,7 @@ class RoleWorkbenchDialog(QDialog):
         self.candidate_count.valueChanged.connect(
             lambda value: self.candidate_count_value.setText(f"当前 {value} 张")
         )
+        self.candidate_count.valueChanged.connect(self._update_credit_hint)
         candidate_count_layout.addWidget(QLabel("1"))
         candidate_count_layout.addWidget(self.candidate_count, 1)
         candidate_count_layout.addWidget(QLabel("4"))
@@ -1946,6 +2009,7 @@ class RoleWorkbenchDialog(QDialog):
         self.input_tabs.addTab(text_page, "文字生成")
         self.input_tabs.addTab(image_page, "图片生成")
         self.input_tabs.currentChanged.connect(self._mode_changed)
+        self.input_tabs.currentChanged.connect(self._update_credit_hint)
         create_stage_layout.addWidget(self.input_tabs)
         create_stage_layout.addStretch(1)
 
@@ -2058,6 +2122,23 @@ class RoleWorkbenchDialog(QDialog):
         recovery_action_row.addWidget(self.cancel_task_button, 1)
         recovery_action_row.addWidget(self.resume_task_button, 1)
         generation_controls.addLayout(main_action_row)
+        # Beside the generate button because every user passes it: a user
+        # without enough generations learns it, and where to redeem, before
+        # pressing generate rather than from a refusal afterwards.
+        self.credit_hint_row = QWidget()
+        credit_hint_layout = QHBoxLayout(self.credit_hint_row)
+        credit_hint_layout.setContentsMargins(0, 0, 0, 0)
+        credit_hint_layout.setSpacing(8)
+        self.credit_hint_label = QLabel("")
+        self.credit_hint_label.setWordWrap(True)
+        self.credit_hint_label.setStyleSheet("color: #b42318;")
+        self.credit_hint_button = QPushButton("输入兑换码")
+        self.credit_hint_button.setStyleSheet(theme.button_qss("accent"))
+        self.credit_hint_button.clicked.connect(self._open_credit_dialog)
+        credit_hint_layout.addWidget(self.credit_hint_label, 1)
+        credit_hint_layout.addWidget(self.credit_hint_button)
+        self.credit_hint_row.setVisible(False)
+        generation_controls.addWidget(self.credit_hint_row)
         generation_controls.addLayout(recovery_action_row)
         left_layout.addWidget(self.generation_panel)
 
@@ -2167,6 +2248,65 @@ class RoleWorkbenchDialog(QDialog):
         ):
             self._show_home()
         self._apply_generation_availability()
+        if self._connection is not None:
+            self._connection.changed.connect(self._sync_connection)
+            self._sync_connection()
+            self._connection.ensure_fresh()
+
+    @Slot(str, str, bool)
+    def _sync_connection(
+        self, _account_id: str = "", _status: str = "", _offline: bool = False
+    ) -> None:
+        connection = self._connection
+        if connection is None:
+            return
+        if self.account_summary_label is not None:
+            self.account_summary_label.setText(_connection_balance_text(connection))
+        if self.account_refresh_button is not None:
+            self.account_refresh_button.setVisible(connection.offline)
+        _show_support_id(self, connection.account_id)
+        self._update_credit_hint()
+
+    def _credit_shortfall(self) -> str:
+        """Why the next step cannot be paid for, judged from the cached balance.
+
+        Only a hint: the service decides, and a balance up to a few minutes
+        old may be stale, so the generate button stays enabled.
+        """
+        connection = self._connection
+        summary = getattr(connection, "summary", None)
+        if summary is None or not self._generation_available:
+            return ""
+        flexible = summary.available_flexible_units
+        categorized = summary.available_t2i_units + summary.available_i2v_units + flexible
+        if categorized < summary.available_units:
+            flexible += summary.available_units - categorized
+        if self._ui_stage == 1:
+            if self.input_tabs.currentIndex() != 0:
+                return ""  # An uploaded identity image costs no generation.
+            needed = self.candidate_count.value()
+            left = summary.available_t2i_units + flexible
+            kind = "立绘"
+        elif self._ui_stage == 2:
+            needed = len(self._selected_actions())
+            left = summary.available_i2v_units + flexible
+            kind = "动作"
+        else:
+            return ""
+        if needed <= 0 or left >= needed:
+            return ""
+        return f"{kind}次数不足：需要 {needed} 次，剩 {left} 次"
+
+    def _update_credit_hint(self, *_args: object) -> None:
+        hint = getattr(self, "credit_hint_row", None)
+        if hint is None:
+            return
+        shortfall = "" if self._worker is not None else self._credit_shortfall()
+        self.credit_hint_label.setText(shortfall)
+        self.credit_hint_button.setVisible(
+            callable(getattr(self._service_transport, "redeem_credit_code", None))
+        )
+        hint.setVisible(bool(shortfall))
 
     def _client_event_stage(self) -> str:
         if self._client_event_home_visible:
@@ -2305,6 +2445,8 @@ class RoleWorkbenchDialog(QDialog):
         if isinstance(error, RoleServiceHttpError):
             if error.status in {401, 403} or error.code == "invalid_token":
                 return "authentication_failed"
+            if _is_insufficient_units(error):
+                return "insufficient_units"
             if error.status == 413:
                 return "request_too_large"
             if error.status >= 500:
@@ -2460,13 +2602,6 @@ class RoleWorkbenchDialog(QDialog):
             return
         self._show_home()
 
-    def _request_service_unbinding(self) -> None:
-        if self._worker is not None:
-            return
-        if not self._confirm_leave_unsaved_result("断开生成服务"):
-            return
-        self.unbinding_requested.emit()
-
     def _begin_new_role_from_home(self) -> None:
         if not self._confirm_leave_unsaved_result("创建新角色"):
             return
@@ -2488,6 +2623,7 @@ class RoleWorkbenchDialog(QDialog):
             not busy and self.resume_task_button.isEnabled()
         )
         self.generation_panel.setVisible(self._ui_stage < 3)
+        self._update_credit_hint()
 
     def _return_to_creation(self) -> None:
         if self._worker is not None or self._ui_stage != 2:
@@ -2964,6 +3100,7 @@ class RoleWorkbenchDialog(QDialog):
     def _update_generation_selection(self) -> None:
         count = len(self._selected_actions())
         self._update_action_options_summary()
+        self._update_credit_hint()
         if self._editing_key is not None:
             next_version = self._role_library.next_version(self._editing_key.role_id)
             self.generate_button.setText(f"生成 {count} 个动作并创建 v{next_version}")
@@ -3835,8 +3972,6 @@ class RoleWorkbenchDialog(QDialog):
             self.account_refresh_button.setEnabled(not busy)
         if self.redeem_credit_button is not None:
             self.redeem_credit_button.setEnabled(not busy)
-        if self.disconnect_service_button is not None:
-            self.disconnect_service_button.setEnabled(not busy)
         self.new_role_mode.setEnabled(not busy)
         self.edit_role_mode.setEnabled(
             not busy and self.edit_role_selector.count() > 1
@@ -3862,6 +3997,7 @@ class RoleWorkbenchDialog(QDialog):
         self.resume_task_button.setEnabled(
             self._generation_available
             and not busy
+            and not self._resume_needs_credits
             and (
                 self._can_resume_active_task()
                 or (
@@ -3957,6 +4093,10 @@ class RoleWorkbenchDialog(QDialog):
     ) -> None:
         if self._worker is not None:
             return
+        if announce_result:
+            # New user work (a smaller request, a resume after redeeming)
+            # clears the credit block; housekeeping queries do not.
+            self._resume_needs_credits = False
         self._current_operation = operation
         self._current_success = success
         # Housekeeping queries run through this same plumbing but are not work
@@ -3979,6 +4119,11 @@ class RoleWorkbenchDialog(QDialog):
     def _refresh_account_summary(
         self, _checked: bool = False, *, quiet: bool = False
     ) -> None:
+        if self._connection is not None:
+            # Off the workbench worker, so a balance check never blocks or
+            # waits behind a generation task.
+            self._connection.invalidate()
+            return
         query = getattr(self._service_transport, "account_summary", None)
         if not callable(query) or self._worker is not None:
             return
@@ -4012,11 +4157,21 @@ class RoleWorkbenchDialog(QDialog):
             self._service_transport,
             self,
             account_id=self._account_id,
+            connection=self._connection,
         )
         dialog.exec()
         if dialog.redeemed_successfully:
             self.status.setText("兑换成功；生成次数已经到账。")
-            self._refresh_account_summary(quiet=True)
+            self._resume_needs_credits = False
+            if self._active_task_id:
+                # A task refused for credits may be resumed now (C1).
+                self.resume_task_button.setEnabled(
+                    self._generation_available and self._can_resume_active_task()
+                )
+            if self._connection is None:
+                # The shared connection already took the balance from the
+                # redeem response.
+                self._refresh_account_summary(quiet=True)
 
     def _prepare_candidates(self) -> None:
         if not self._generation_available:
@@ -4591,6 +4746,8 @@ class RoleWorkbenchDialog(QDialog):
             if self._active_task_context is not None
             else "initial_package"
         )
+        self._preview_shown_at = time.monotonic()
+        self._preview_task_id = self._package_task_id
         self._record_client_event(
             "preview_ready",
             remote_task_id=self._remote_task_id(self._package_task_id),
@@ -4831,6 +4988,9 @@ class RoleWorkbenchDialog(QDialog):
             f"{installed.package.display_name} v{installed.key.package_version} "
             "已安全安装；旧版本仍可在设置中回滚。"
         )
+        if package_task_id == self._preview_task_id:
+            self._preview_shown_at = None
+            self._preview_task_id = ""
         if remote_task_id:
             self._last_installed_remote_task_id = remote_task_id
             self._record_client_event(
@@ -4875,6 +5035,7 @@ class RoleWorkbenchDialog(QDialog):
         if (
             self._candidate_result is None and self._package_result is None
         ) or self._result_saved:
+            self._record_preview_dismissed()
             return True
         answer = QMessageBox.question(
             self,
@@ -4885,7 +5046,32 @@ class RoleWorkbenchDialog(QDialog):
             QMessageBox.Yes | QMessageBox.Cancel,
             QMessageBox.Cancel,
         )
-        return answer == QMessageBox.Yes
+        if answer != QMessageBox.Yes:
+            return False
+        self._record_preview_dismissed()
+        return True
+
+    def _record_preview_dismissed(self) -> None:
+        """A ready package preview is being left without installing it.
+
+        Revisions submitted from the preview do not count: the user is still
+        working on the same role. Only leaving the preview (closing the
+        workshop, switching or creating a role, regenerating the identity)
+        does. Exporting without installing still counts as dismissed.
+        """
+
+        started, task_id = self._preview_shown_at, self._preview_task_id
+        if started is None or not task_id:
+            return
+        self._preview_shown_at = None
+        self._preview_task_id = ""
+        duration_ms = max(0, min(int((time.monotonic() - started) * 1000), 604_800_000))
+        self._record_client_event(
+            "preview_dismissed",
+            remote_task_id=self._remote_task_id(task_id),
+            properties={"duration_ms": duration_ms, "package_ready": True},
+            once_key=f"{task_id}:preview_dismissed",
+        )
 
     def _announce_long_wait(self) -> None:
         """Have the pet say a task started, once per task.
@@ -5040,6 +5226,23 @@ class RoleWorkbenchDialog(QDialog):
             self.status.setText(message)
             self._show_content_rejected_dialog(message)
             return
+        if _is_insufficient_units(error):
+            # C1 (G13, 2026-10-12): resuming repeats the same request, which the
+            # service refuses again until the balance changes -- G13 pressed
+            # "resume" straight into a second refusal.  Say what is missing,
+            # re-read the balance, and keep resume for after a redeem.
+            self._refresh_account_summary(quiet=True)
+            shortfall = self._credit_shortfall() or message
+            self.status.setText(f"次数不足：{shortfall}")
+            self._update_credit_hint()
+            self._resume_needs_credits = True
+            self.resume_task_button.setEnabled(False)
+            QMessageBox.information(
+                self,
+                "生成次数不足",
+                f"{shortfall}\n\n可以调低数量后重新生成，或在「生成次数」里兑换后再恢复。",
+            )
+            return
         if self._active_task_id:
             self.resume_task_button.setEnabled(
                 self._generation_available and self._can_resume_active_task()
@@ -5079,10 +5282,21 @@ class RoleWorkbenchDialog(QDialog):
         """
 
         self._clear_terminal_task_context()
+        cause = error.cause
+        self._record_client_event(
+            "client_error_shown",
+            properties={
+                "error_code": self._client_error_code(cause),
+                "reason": (
+                    "network_error"
+                    if isinstance(cause, RoleServiceConnectionError)
+                    else "service_error"
+                ),
+            },
+        )
         # Deliberately not role_service_user_message: that copy ends in "resume
         # the same task", which is written for a fault during the wait. Here no
         # task was ever created.
-        cause = error.cause
         if (
             isinstance(cause, RoleServiceConnectionError)
             and cause.code == "service_timeout"

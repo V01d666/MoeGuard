@@ -45,7 +45,7 @@ def _error_text(error: Exception) -> str:
         if error.status == 429:
             return "留言或刷新频率达到上限，请稍后再试。"
         if error.status in {401, 403}:
-            return "匿名连接已失效，请重新连接服务。"
+            return "匿名连接暂时不可用，请稍后刷新。"
         if error.status == 404:
             return "此服务暂未提供信箱功能，本地桌宠可继续使用。"
     return "暂时无法连接信箱，请稍后刷新；本地桌宠可继续使用。"
@@ -70,7 +70,6 @@ class _MailJob(QObject):
 
 
 class MailboxDialog(QDialog):
-    binding_requested = Signal()
     unread_changed = Signal(int)
 
     def __init__(
@@ -80,7 +79,6 @@ class MailboxDialog(QDialog):
         read_store: MailboxReadStore,
         *,
         account_id: str = "",
-        binding_available: bool = False,
         diagnostics: Callable[[], MailboxDiagnostics] = mailbox_diagnostics,
         confirm_send: Callable[[MailboxMessageRequest], bool] | None = None,
         clock: Callable[[], float] = time.time,
@@ -119,10 +117,6 @@ class MailboxDialog(QDialog):
         self.refresh_button = QPushButton("刷新")
         self.refresh_button.clicked.connect(self.refresh)
         bar.addWidget(self.refresh_button)
-        self.bind_button = QPushButton("连接服务")
-        self.bind_button.setVisible(transport is None and binding_available)
-        self.bind_button.clicked.connect(self.binding_requested)
-        bar.addWidget(self.bind_button)
         inbox_layout.addLayout(bar)
         self.tabs = QTabWidget()
         self.inbox = QListWidget()
@@ -179,7 +173,7 @@ class MailboxDialog(QDialog):
             self.status.setText("此候选版尚未配置信箱服务，本地桌宠可继续使用。")
             self.refresh_button.setEnabled(False)
         elif transport is None:
-            self.status.setText("未连接匿名账户；可查看公告，连接后可留言和接收回复。")
+            self.status.setText("正在连接服务；连接后可留言和接收回复。")
         self._update_send_state()
         if auto_refresh and (public_transport is not None or transport is not None):
             self.refresh()
@@ -190,7 +184,6 @@ class MailboxDialog(QDialog):
     def set_connection(self, transport: Any, account_id: str) -> None:
         self._transport = transport
         self._account_id = account_id
-        self.bind_button.hide()
         self._update_send_state()
         if self._job is not None:
             self._refresh_after_connection = True

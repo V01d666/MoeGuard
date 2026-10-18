@@ -19,6 +19,7 @@ from moeguard.cloud.role_service_bootstrap import (
 from moeguard.cloud.role_service_http_client import (
     HttpRoleServiceTransport,
     RoleServiceEnrollment,
+    RoleServiceHttpError,
 )
 from moeguard.cloud.role_service_session import (
     CredentialProtector,
@@ -167,7 +168,13 @@ class RoleServiceEnrollmentStore:
 
 
 class RoleServiceBindingManager:
-    """Create, recover and remove one anonymous role-service binding."""
+    """Create and silently renew this device's one anonymous binding.
+
+    The support ID is the server account, and the server maps one enrollment
+    identity to one account forever, so the identity is never deleted here:
+    a token that expires or is rejected is renewed with the same identity and
+    the user keeps their ID and their remaining generations.
+    """
 
     def __init__(
         self,
@@ -182,7 +189,9 @@ class RoleServiceBindingManager:
         self._enroll = enroll or HttpRoleServiceTransport.enroll
         self._clock = clock
         self._binding_lock = threading.RLock()
-        self.auto_connect_disabled_path = session_store.path.with_name(
+        # Written by v0.3.0's "disconnect" button, which v0.4.0 removed.  A
+        # stale marker must not keep a user offline, so it is only cleared.
+        self._legacy_disconnect_marker = session_store.path.with_name(
             "automatic-connection-disabled"
         )
 
@@ -193,16 +202,51 @@ class RoleServiceBindingManager:
         return session
 
     def bind(self, service_origin: str) -> RoleServiceSession:
+        """Return a usable session, enrolling only when none is stored.
+
+        A stored, unexpired session costs no network request.
+        """
         with self._binding_lock:
             session = self._bind(service_origin)
-            self.auto_connect_disabled_path.unlink(missing_ok=True)
+            if not self._legacy_disconnect_marker.is_symlink():
+                self._legacy_disconnect_marker.unlink(missing_ok=True)
             return session
 
-    def bind_automatically(self, service_origin: str) -> RoleServiceSession | None:
+    def renew(self, service_origin: str, rejected_token: str) -> RoleServiceSession:
+        """Replace a token the service rejected, keeping the same identity.
+
+        Concurrent callers that hit the same rejection renew once: whoever
+        holds the lock second finds a different token already stored.
+        """
         with self._binding_lock:
-            if self.auto_connect_disabled_path.exists():
-                return None
+            try:
+                stored = self.current_session()
+            except (OSError, ValueError):
+                stored = None
+            if stored is not None and stored.bearer_token != rejected_token:
+                return stored
+            # Secure the identity before dropping the session that carries it.
+            self._recovery_identity(https_role_service_origin(service_origin))
+            self.session_store.delete()
             return self.bind(service_origin)
+
+    def _recovery_identity(self, origin: str) -> RoleServiceEnrollmentIdentity | None:
+        identity = self.enrollment_store.load()
+        if identity is not None and identity.service_origin == origin:
+            return identity
+        # The session file carries the same identity.  Recovering it keeps
+        # the support ID if only the enrollment file was lost.
+        try:
+            stored = self.session_store.load()
+        except (OSError, ValueError):
+            return None
+        if stored is None or stored.service_origin != origin:
+            return None
+        identity = RoleServiceEnrollmentIdentity(
+            origin, stored.enrollment_id, stored.enrollment_secret
+        )
+        self.enrollment_store.save(identity)
+        return identity
 
     def _bind(self, service_origin: str) -> RoleServiceSession:
         origin = https_role_service_origin(service_origin)
@@ -214,8 +258,8 @@ class RoleServiceBindingManager:
         if session is not None and session.service_origin == origin:
             return session
 
-        identity = self.enrollment_store.load()
-        if identity is None or identity.service_origin != origin:
+        identity = self._recovery_identity(origin)
+        if identity is None:
             credentials = new_client_enrollment_credentials()
             identity = RoleServiceEnrollmentIdentity(
                 origin,
@@ -240,14 +284,90 @@ class RoleServiceBindingManager:
         self.session_store.save(session)
         return session
 
-    def unbind(self) -> None:
-        with self._binding_lock:
-            marker = self.auto_connect_disabled_path
-            marker.parent.mkdir(parents=True, exist_ok=True)
-            if marker.is_symlink():
-                raise ValueError("automatic connection preference path is unsafe")
-            if not marker.exists():
-                with marker.open("xb"):
-                    pass
-            self.session_store.delete()
-            self.enrollment_store.delete()
+
+def _is_rejected_token(error: Exception) -> bool:
+    return isinstance(error, RoleServiceHttpError) and error.code == "invalid_token"
+
+
+class SessionTransport:
+    """The role-service transport for this device, connecting on demand.
+
+    Every call obtains the device session first (no network while a stored
+    session is valid) and, if the service rejects the token, renews it once
+    with the same identity and repeats the call.  Authentication is checked
+    before any request is processed, so the repeat cannot double a side
+    effect.  This is what lets the workshop generate without a separate
+    "connect" step and survive a token expiring while the app is open.
+    """
+
+    def __init__(
+        self,
+        manager: RoleServiceBindingManager,
+        service_origin: str,
+        *,
+        timeout: float = 30.0,
+        on_session: Callable[[RoleServiceSession], None] | None = None,
+    ) -> None:
+        self.manager = manager
+        self.service_origin = https_role_service_origin(service_origin)
+        self.timeout = timeout
+        self._on_session = on_session
+
+    def session(self) -> RoleServiceSession:
+        session = self.manager.bind(self.service_origin)
+        if self._on_session is not None:
+            self._on_session(session)
+        return session
+
+    def _call(self, name: str, *args: object, **kwargs: object) -> object:
+        session = self.session()
+        try:
+            return getattr(session.transport(timeout=self.timeout), name)(*args, **kwargs)
+        except RoleServiceHttpError as error:
+            if not _is_rejected_token(error):
+                raise
+        renewed = self.manager.renew(self.service_origin, session.bearer_token)
+        if self._on_session is not None:
+            self._on_session(renewed)
+        return getattr(renewed.transport(timeout=self.timeout), name)(*args, **kwargs)
+
+    def announcements(self):
+        return HttpRoleServiceTransport(
+            self.service_origin, "", timeout=self.timeout
+        ).announcements()
+
+    def upload_asset(self, source, **kwargs):
+        return self._call("upload_asset", source, **kwargs)
+
+    def preflight(self, *, timeout: float) -> None:
+        self._call("preflight", timeout=timeout)
+
+    def account_summary(self):
+        return self._call("account_summary")
+
+    def redeem_credit_code(self, code: str):
+        return self._call("redeem_credit_code", code)
+
+    def submit_client_events(self, events):
+        return self._call("submit_client_events", events)
+
+    def mailbox_thread(self):
+        return self._call("mailbox_thread")
+
+    def post_mailbox_message(self, message):
+        return self._call("post_mailbox_message", message)
+
+    def create_purchase_intent(self):
+        return self._call("create_purchase_intent")
+
+    def submit(self, request, *, idempotency_sha256: str):
+        return self._call("submit", request, idempotency_sha256=idempotency_sha256)
+
+    def query(self, remote_task_id: str):
+        return self._call("query", remote_task_id)
+
+    def cancel(self, remote_task_id: str):
+        return self._call("cancel", remote_task_id)
+
+    def download_result(self, remote_task_id: str, destination: Path) -> str:
+        return self._call("download_result", remote_task_id, destination)

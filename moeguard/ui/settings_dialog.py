@@ -337,7 +337,12 @@ class SettingsDialog(QDialog):
         about_frame, about_form = _make_section("关于与反馈")
         self.support_id_edit = QLineEdit(self._support_id)
         self.support_id_edit.setReadOnly(True)
-        self.support_id_edit.setPlaceholderText("连接服务后显示匿名编号")
+        self.support_id_edit.setPlaceholderText("连接服务后自动显示")
+        self.support_id_edit.setToolTip(
+            "这台电脑的匿名支持编号，反馈问题时提供它即可。"
+            "账号随机生成，不需要邮箱，也不读取硬件序列号；"
+            "凭据仅以 Windows 当前用户保护的形式保存在本机。"
+        )
         support_row = QWidget()
         support_layout = QHBoxLayout(support_row)
         support_layout.setContentsMargins(0, 0, 0, 0)
@@ -345,7 +350,7 @@ class SettingsDialog(QDialog):
         self.copy_support_id_button = QPushButton("复制编号")
         self.copy_support_id_button.setEnabled(bool(self._support_id))
         self.copy_support_id_button.clicked.connect(
-            lambda: QApplication.clipboard().setText(self._support_id)
+            lambda: QApplication.clipboard().setText(self.support_id_edit.text())
         )
         support_layout.addWidget(self.copy_support_id_button)
         about_form.addRow("支持编号", support_row)
@@ -465,6 +470,7 @@ class SettingsDialog(QDialog):
             role_form.addRow("生成服务", self.role_credit_button)
         if self._custom_role_workbench_available:
             self.role_pilot_notice_label = QLabel(PILOT_NOTICE_TEXT)
+            self.role_pilot_notice_label.setWordWrap(True)
             self.role_pilot_notice_label.setProperty("role", "hint")
             role_form.addRow("内测说明", self.role_pilot_notice_label)
         self.role_selector.currentIndexChanged.connect(
@@ -531,16 +537,19 @@ class SettingsDialog(QDialog):
         scroll.setWidget(tab)
         self._tabs.addTab(scroll, "通用")
 
-    @Slot(str, str)
-    def set_service_connection(self, account_id: str, status: str) -> None:
-        self._support_id = account_id
-        self.support_id_edit.setText(account_id)
-        self.support_id_edit.setPlaceholderText(status or "连接服务后显示匿名编号")
-        self.copy_support_id_button.setEnabled(bool(account_id))
+    @Slot(str, str, bool)
+    def set_service_connection(
+        self, account_id: str, status: str, offline: bool = False
+    ) -> None:
+        """Follow the app's service connection; retry shows only when it failed."""
+        if account_id:
+            self._support_id = account_id
+            self.support_id_edit.setText(account_id)
+        self.support_id_edit.setPlaceholderText(status or "连接服务后自动显示")
+        self.copy_support_id_button.setEnabled(bool(self._support_id))
         self.connect_service_button.setVisible(
-            self._service_connection_available and not account_id
+            self._service_connection_available and offline
         )
-        self.connect_service_button.setEnabled(status != "正在连接服务…")
 
     def _open_custom_role_workbench(self) -> None:
         """Close the stale settings snapshot before opening the role editor."""

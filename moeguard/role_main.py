@@ -16,18 +16,16 @@ import time  # noqa: E402
 from collections.abc import Callable, Mapping  # noqa: E402
 from pathlib import Path  # noqa: E402
 
-from PySide6.QtCore import QTimer  # noqa: E402
-from PySide6.QtWidgets import QDialog, QMessageBox  # noqa: E402
+from PySide6.QtCore import QObject, QTimer  # noqa: E402
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox  # noqa: E402
 
-from moeguard import __version__  # noqa: E402
+from moeguard import __version__, updater  # noqa: E402
 from moeguard.app import MoeGuardApp, run  # noqa: E402
+from moeguard.cloud import role_service_http_client  # noqa: E402
 from moeguard.cloud.role_service_binding import (  # noqa: E402
     RoleServiceBindingManager,
     RoleServiceEnrollmentStore,
-)
-from moeguard.cloud.role_service_binding_dialog import (  # noqa: E402
-    AutomaticServiceConnection,
-    RoleServiceBindingDialog,
+    SessionTransport,
 )
 from moeguard.cloud.role_service_bootstrap import (  # noqa: E402
     https_role_service_origin,
@@ -37,9 +35,12 @@ from moeguard.cloud.role_service_bootstrap import (  # noqa: E402
 )
 from moeguard.cloud.role_service_client_events import (  # noqa: E402
     ClientEventOutboxStore,
+    DailyActiveGate,
     PreviewClientEventReporter,
     PreviewClientEventTracker,
+    RequestLatencyBook,
 )
+from moeguard.cloud.role_service_connection import ServiceConnection  # noqa: E402
 from moeguard.cloud.role_service_http_client import HttpRoleServiceTransport  # noqa: E402
 from moeguard.cloud.role_service_mailbox_client import (  # noqa: E402
     MailboxReadStore,
@@ -51,9 +52,121 @@ from moeguard.cloud.role_workbench import (  # noqa: E402
     RemoteRoleWorkbenchBackend,
     RoleCreditDialog,
     RoleWorkbenchDialog,
+    _client_runtime_info,
 )
 from moeguard.roles import PackageKey, RoleLibrary  # noqa: E402
 from moeguard.utils.paths import ROLE_WORKBENCH_DIR, resource_path  # noqa: E402
+
+# How often latency samples are sent and the day boundary is re-checked.
+TELEMETRY_PERIOD_MS = 30 * 60 * 1000
+
+
+class AppTelemetry(QObject):
+    """App-wide v0.4.0 heartbeats that do not belong to the workshop.
+
+    ``daily_active`` (at most one per local day) answers whether the pet is
+    still on the desktop -- with a valid stored session v0.3.0 started
+    without any request, so nothing showed an installed copy was in use.
+    ``network_sample`` reports client-measured request latency per route
+    family. Both carry only enums and numbers, never names, paths or text,
+    and neither ever raises into the app.
+    """
+
+    def __init__(
+        self,
+        app: MoeGuardApp,
+        reporter: PreviewClientEventReporter,
+        gate: DailyActiveGate,
+        latency: RequestLatencyBook,
+        *,
+        role_library: RoleLibrary,
+        period_ms: int = TELEMETRY_PERIOD_MS,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        super().__init__(app)
+        self._app = app
+        self.reporter = reporter
+        self.gate = gate
+        self.latency = latency
+        self._library = role_library
+        self._monotonic = monotonic
+        self._started_at = monotonic()
+        self._timer = QTimer(self)
+        self._timer.setInterval(period_ms)
+        self._timer.timeout.connect(self.tick)
+
+    def start(self) -> None:
+        self.record_daily_active()
+        self._timer.start()
+
+    def tick(self) -> None:
+        self.record_daily_active()
+        self.record_network_samples()
+
+    def shutdown(self) -> None:
+        self._timer.stop()
+        self.record_network_samples()
+
+    def _record(self, event_name: str, properties: dict[str, object]) -> bool:
+        try:
+            return bool(
+                self.reporter.record(
+                    event_name,
+                    properties={"screen": "runtime", "entrypoint": "startup", **properties},
+                )
+            )
+        except Exception:  # noqa: BLE001 - telemetry never affects the app
+            return False
+
+    def _role_snapshot(self) -> dict[str, object]:
+        config = getattr(self._app, "_config", None)
+        pet = getattr(config, "pet", None)
+        if pet is None:
+            kind = "none"
+        elif getattr(pet, "role_package_version", 0) > 0 or getattr(pet, "assets_dir", ""):
+            kind = "custom"
+        else:
+            kind = "builtin"
+        snapshot: dict[str, object] = {"active_role_kind": kind}
+        try:
+            roles = {installed.key.role_id for installed in self._library.list()}
+            snapshot["custom_role_count"] = min(1000, len(roles))
+        except Exception:  # noqa: BLE001 - a broken library only drops the count
+            pass
+        return snapshot
+
+    def record_daily_active(self) -> bool:
+        try:
+            if not self.gate.due():
+                return False
+            runtime = _client_runtime_info()
+            properties: dict[str, object] = {
+                "install_kind": updater.install_kind(),
+                "uptime_minutes": max(
+                    0, min(7 * 24 * 60, int((self._monotonic() - self._started_at) // 60))
+                ),
+                "windows_major": (
+                    runtime.windows_major
+                    if runtime.windows_major in {"10", "11"}
+                    else "unknown"
+                ),
+                "architecture": runtime.architecture,
+                "display_scale_percent": runtime.display_scale_percent,
+                **self._role_snapshot(),
+            }
+        except Exception:  # noqa: BLE001
+            return False
+        if not self._record("daily_active", properties):
+            return False
+        self.gate.mark()
+        return True
+
+    def record_network_samples(self) -> int:
+        try:
+            samples = self.latency.drain()
+        except Exception:  # noqa: BLE001
+            return 0
+        return sum(1 for sample in samples if self._record("network_sample", sample))
 
 
 def configure_role_workbench(
@@ -69,6 +182,7 @@ def configure_role_workbench(
     clock: Callable[[], float] = time.time,
     pilot_notice_enabled: bool = False,
     client_event_tracker: PreviewClientEventTracker | None = None,
+    watch_network: bool = True,
 ) -> None:
     """Inject the public workbench without embedding provider credentials."""
 
@@ -85,8 +199,21 @@ def configure_role_workbench(
         enrollments,
         clock=clock,
     )
-    refresh_account_on_next_open = False
     event_reporter: PreviewClientEventReporter | None = None
+    shared_tracker: PreviewClientEventTracker | None = client_event_tracker
+
+    def event_tracker() -> PreviewClientEventTracker:
+        # One tracker (one outbox file and one sequence) for every reporter.
+        nonlocal shared_tracker
+        if shared_tracker is None:
+            shared_tracker = PreviewClientEventTracker(
+                ClientEventOutboxStore(workspace / "state" / "client-events.json"),
+                app_version=__version__,
+                enabled=lambda: pilot_notice_enabled,
+                clock=clock,
+            )
+        return shared_tracker
+
     try:
         if service_origin is not None:
             configured_origin = https_role_service_origin(service_origin)
@@ -99,110 +226,99 @@ def configure_role_workbench(
     except ValueError:
         configured_origin = None
 
+    # One device session for every surface.  It connects on demand, renews a
+    # rejected token with the same identity, and keeps the support ID forever;
+    # there is no connect or disconnect step for the user.
     connection = (
-        AutomaticServiceConnection(binding, configured_origin, app)
-        if configured_origin is not None else None
+        ServiceConnection(
+            SessionTransport(binding, configured_origin),
+            app,
+            watch_network=watch_network,
+        )
+        if configured_origin is not None
+        else None
     )
     app._service_connection = connection
     if connection is not None:
         app.ready.connect(connection.start)
 
-    def make_binding_dialog(
-        origin: str | None = None,
-        *,
-        reopen: Callable[[], None] | None = None,
-    ) -> RoleServiceBindingDialog:
-        target_origin = origin or configured_origin
-        assert target_origin is not None
-        dialog = RoleServiceBindingDialog(binding, target_origin)
+    app_reporter: PreviewClientEventReporter | None = None
+    app._telemetry = None
+    if connection is not None and pilot_notice_enabled:
+        app_reporter = PreviewClientEventReporter(event_tracker(), connection.transport)
+        latency = RequestLatencyBook()
+        telemetry = AppTelemetry(
+            app,
+            app_reporter,
+            DailyActiveGate(workspace / "state" / "daily-active.json"),
+            latency,
+            role_library=library,
+        )
+        app._telemetry = telemetry
+        role_service_http_client.set_request_observer(latency.observe)
+        updater.set_feed_observer(latency.observe)
+        # After the connection starts, so the first heartbeat reuses the
+        # session that startup request establishes.
+        app.ready.connect(telemetry.start)
+        qt_app = QApplication.instance()
+        if qt_app is not None:
+            qt_app.aboutToQuit.connect(telemetry.shutdown)
 
-        def reopen_bound_destination() -> None:
-            nonlocal refresh_account_on_next_open
-            if connection is not None and dialog.session is not None:
-                connection._complete(dialog.session)
-            destination = reopen or app._on_open_custom_role_workbench
-            if destination == app._on_open_custom_role_workbench:
-                refresh_account_on_next_open = True
-            QTimer.singleShot(0, destination)
+    def stored_account_id() -> str:
+        if connection is not None and connection.account_id:
+            return connection.account_id
+        try:
+            session = sessions.load()
+        except (OSError, ValueError):
+            return ""
+        return session.account_id if session is not None else ""
 
-        dialog.accepted.connect(reopen_bound_destination)
-        return dialog
+    def developer_transport() -> tuple[object | None, bool]:
+        """An explicit developer token wins; a broken one is reported."""
+        try:
+            return role_service_transport_from_environment(environ), False
+        except ValueError:
+            pass
+        # A service URL without a token only names the origin, which the
+        # device session already uses; anything else is a misconfiguration.
+        try:
+            origin_only = role_service_origin_from_environment(environ) is not None
+        except ValueError:
+            origin_only = False
+        return None, not (origin_only and connection is not None)
 
     def make_credit_dialog() -> QDialog:
-        remembered_origin = None
-        account_id = ""
-        unavailable_message = ""
-        try:
-            stored = sessions.load()
-            if stored is not None:
-                remembered_origin = stored.service_origin
-                account_id = stored.account_id
-            session = binding.current_session()
-            transport = (
-                session.transport()
-                if session is not None
-                else role_service_transport_from_environment(environ)
-            )
-        except (OSError, ValueError):
-            session = None
-            transport = None
-            unavailable_message = (
-                "生成服务连接信息无效；请重新连接后再查看或兑换生成次数。"
-            )
-
+        transport, invalid = developer_transport()
         if transport is not None:
-            return RoleCreditDialog(transport, account_id=account_id)
-
-        binding_origin = configured_origin or remembered_origin
-        if binding_origin is not None:
-            return make_binding_dialog(
-                binding_origin,
-                reopen=app._on_open_role_credit_dialog,
+            return RoleCreditDialog(transport, account_id=stored_account_id())
+        if connection is not None and not invalid:
+            return RoleCreditDialog(
+                connection.transport,
+                account_id=stored_account_id(),
+                connection=connection,
             )
         return RoleCreditDialog(
             None,
             unavailable_message=(
-                unavailable_message
-                or "此候选版尚未配置生成服务地址，暂时无法查看或兑换生成次数。"
+                "生成服务连接信息无效，暂时无法查看或兑换生成次数。"
+                if invalid
+                else "此候选版尚未配置生成服务地址，暂时无法查看或兑换生成次数。"
             ),
         )
 
     def make_workbench():
-        nonlocal event_reporter, refresh_account_on_next_open
-        refresh_account = refresh_account_on_next_open
-        refresh_account_on_next_open = False
-        session = None
-        account_id = ""
-        remembered_origin = None
+        nonlocal event_reporter
+        transport, invalid = developer_transport()
+        workbench_connection = None
+        if transport is None and connection is not None and not invalid:
+            transport = connection.transport
+            workbench_connection = connection
+        generation_available = transport is not None
         unavailable_message = ""
-        try:
-            session = sessions.load()
-            if session is not None:
-                remembered_origin = session.service_origin
-                account_id = session.account_id
-            if session is not None and session.expires_at <= int(clock()):
-                unavailable_message = (
-                    "生成服务连接已过期；本地桌宠仍可查看和管理。"
-                    "重新连接后可继续生成。"
-                )
-                session = None
-            transport = (
-                session.transport()
-                if session is not None
-                else role_service_transport_from_environment(environ)
-            )
-        except (OSError, ValueError):
-            transport = None
+        if not generation_available:
             unavailable_message = (
                 "生成服务连接信息无效；本地桌宠仍可查看和管理。"
-                "重新连接后可继续生成。"
-            )
-        binding_origin = configured_origin or remembered_origin
-        generation_available = transport is not None
-        if not generation_available and not unavailable_message:
-            unavailable_message = (
-                "尚未连接生成服务；本地桌宠仍可查看和管理。"
-                if binding_origin is not None
+                if invalid
                 else "此候选版尚未配置生成服务地址；本地桌宠仍可查看和管理。"
             )
         if (
@@ -210,15 +326,10 @@ def configure_role_workbench(
             and pilot_notice_enabled
             and event_reporter is None
         ):
-            tracker = client_event_tracker
-            if tracker is None:
-                tracker = PreviewClientEventTracker(
-                    ClientEventOutboxStore(workspace / "state" / "client-events.json"),
-                    app_version=__version__,
-                    enabled=lambda: pilot_notice_enabled,
-                    clock=clock,
-                )
-            event_reporter = PreviewClientEventReporter(tracker, transport)
+            if workbench_connection is not None and app_reporter is not None:
+                event_reporter = app_reporter
+            else:
+                event_reporter = PreviewClientEventReporter(event_tracker(), transport)
         dialog = RoleWorkbenchDialog(
             RemoteRoleWorkbenchBackend(workspace),
             show_costs=False,
@@ -226,52 +337,13 @@ def configure_role_workbench(
             service_transport=transport,
             generation_available=generation_available,
             generation_unavailable_message=unavailable_message,
-            binding_available=binding_origin is not None,
-            service_unbinding_available=session is not None,
             client_events=event_reporter if transport is not None else None,
             client_event_entrypoint="settings",
-            account_id=account_id,
+            account_id=stored_account_id() if transport is not None else "",
             notify_user=app.notify_workbench_result,
             announce_wait=app.announce_workbench_wait,
+            connection=workbench_connection,
         )
-
-        if binding_origin is not None and not generation_available:
-            def begin_binding() -> None:
-                dialog.accept()
-                make_binding_dialog(binding_origin).exec()
-
-            dialog.binding_requested.connect(begin_binding)
-
-        if session is not None:
-            def remove_binding() -> None:
-                nonlocal event_reporter
-                answer = QMessageBox.warning(
-                    dialog,
-                    "断开角色生成服务？",
-                    "这会删除这台电脑保存的匿名连接凭据。已安装桌宠不受影响，"
-                    "但这个匿名账号的剩余生成次数和未完成任务将无法在本机找回。\n\n"
-                    "是否继续？",
-                    QMessageBox.Yes | QMessageBox.Cancel,
-                    QMessageBox.Cancel,
-                )
-                if answer != QMessageBox.Yes:
-                    return
-                try:
-                    binding.unbind()
-                    if connection is not None:
-                        connection.disconnected()
-                except (OSError, ValueError):
-                    QMessageBox.critical(
-                        dialog,
-                        "无法断开生成服务",
-                        "本机连接凭据未能完整删除。请重启萌卫检查连接状态后再试。",
-                    )
-                    return
-                event_reporter = None
-                dialog.accept()
-                QTimer.singleShot(0, app._on_open_custom_role_workbench)
-
-            dialog.unbinding_requested.connect(remove_binding)
 
         def install(key: object) -> None:
             if not isinstance(key, PackageKey):
@@ -285,56 +357,47 @@ def configure_role_workbench(
                 QMessageBox.critical(dialog, "角色切换失败", message)
 
         dialog.install_requested.connect(install)
-        if refresh_account and session is not None:
-            QTimer.singleShot(
-                0, lambda: dialog._refresh_account_summary(quiet=True)
-            )
         return dialog
 
     app.set_custom_role_workbench_factory(make_workbench)
     app.set_role_credit_dialog_factory(make_credit_dialog)
 
-    def support_id() -> str:
-        try:
-            session = sessions.load()
-            return session.account_id if session is not None else ""
-        except (OSError, ValueError):
-            return ""
-
     def make_mailbox() -> QDialog:
-        session = None
-        try:
-            session = binding.current_session()
-        except (OSError, ValueError):
-            pass
-        origin = session.service_origin if session is not None else configured_origin
+        origin = configured_origin
         public = HttpRoleServiceTransport(origin, "") if origin else None
-        transport = session.transport() if session is not None else None
+        # Read markers are keyed by the support ID, so the private thread is
+        # attached once the ID is known; until then announcements still load
+        # and the shared connection attaches it the moment it connects.
+        account_id = stored_account_id()
+        transport = (
+            connection.transport if connection is not None and account_id else None
+        )
+        if connection is not None and not account_id:
+            connection.ensure_fresh()
 
         def diagnostics():
-            codes = event_reporter.tracker.recent_error_codes() if event_reporter else ()
+            tracker = shared_tracker
+            codes = ()
+            if tracker is not None and hasattr(tracker, "recent_error_codes"):
+                codes = tracker.recent_error_codes()
             return mailbox_diagnostics(codes)
 
         dialog = MailboxDialog(
             public, transport,
             MailboxReadStore(workspace / "state" / "mailbox-read.json", clock=clock),
-            account_id=session.account_id if session is not None else "",
-            binding_available=origin is not None, diagnostics=diagnostics, clock=clock,
+            account_id=account_id if transport is not None else "",
+            diagnostics=diagnostics, clock=clock,
         )
-        if origin is not None and session is None:
-            def begin_binding() -> None:
-                dialog.accept()
-                make_binding_dialog(origin, reopen=app._on_open_mailbox).exec()
-            dialog.binding_requested.connect(begin_binding)
         return dialog
 
-    app._support_id_provider = support_id
+    app._support_id_provider = stored_account_id
     app._mailbox_dialog_factory = make_mailbox
     if connection is not None:
         def update_open_mailbox(session: object) -> None:
             dialog = app._mailbox_dialog
-            if isinstance(dialog, MailboxDialog) and hasattr(session, "transport"):
-                dialog.set_connection(session.transport(), session.account_id)
+            account_id = getattr(session, "account_id", "")
+            if isinstance(dialog, MailboxDialog) and account_id:
+                dialog.set_connection(connection.transport, account_id)
 
         connection.connected.connect(update_open_mailbox)
 

@@ -1149,9 +1149,15 @@ class MoeGuardApp(QObject):
                 self._service_connection.status if self._service_connection is not None else ""
             ),
         )
-        if self._service_connection is not None:
-            dialog.connect_service_requested.connect(self._service_connection.connect_now)
-            self._service_connection.changed.connect(dialog.set_service_connection)
+        connection = self._service_connection
+        if connection is not None:
+            dialog.connect_service_requested.connect(connection.retry)
+            connection.changed.connect(dialog.set_service_connection)
+            dialog.set_service_connection(
+                connection.account_id, connection.status, connection.offline
+            )
+            if connection.offline:
+                connection.refresh(force=False)
         if self._update_controller is not None:
             dialog.check_update_requested.connect(
                 lambda: self._update_controller.check_now(manual=True)

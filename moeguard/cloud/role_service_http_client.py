@@ -160,6 +160,44 @@ def _urlopen_no_redirect(request: urllib.request.Request, *, timeout: float):
     )
 
 
+# -- request latency (v0.4.0 ``network_sample``) -----------------------------
+#
+# Transports are short-lived (one per call), so the observer is process-wide.
+# It receives only a route family, a duration and whether the link worked.
+RequestObserver = Callable[[str, int, bool], None]
+_request_observer: RequestObserver | None = None
+
+
+def set_request_observer(observer: RequestObserver | None) -> None:
+    global _request_observer
+    _request_observer = observer
+
+
+def latency_route(path: str) -> str:
+    """Map an API path to its ``network_sample`` route family ("" = none)."""
+
+    if path.startswith("/v1/client-events"):
+        return "events"
+    if path.startswith("/v1/assets"):
+        return "assets"
+    if path.startswith("/v1/tasks"):
+        return "results" if path.endswith("/result") else "tasks"
+    if path.startswith(("/v1/account", "/v1/credits", "/v1/enrollments", "/v1/commerce")):
+        return "account"
+    return ""
+
+
+def _observe_request(path: str, started: float, ok: bool) -> None:
+    observer = _request_observer
+    route = latency_route(path)
+    if observer is None or not route:
+        return
+    try:
+        observer(route, int((time.monotonic() - started) * 1000), ok)
+    except Exception:  # noqa: BLE001 - telemetry never affects a request
+        pass
+
+
 def _read_bounded(response: Any, limit: int) -> bytes:
     if limit <= 0:
         raise ValueError("role service response limit is invalid")
@@ -403,6 +441,38 @@ class HttpRoleServiceTransport:
         raise last_error
 
     def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        body: bytes = b"",
+        headers: dict[str, str] | None = None,
+        authenticated: bool = True,
+        max_response_bytes: int = _MAX_JSON_RESPONSE_BYTES,
+        timeout: float | None = None,
+    ) -> tuple[bytes, Any]:
+        started = time.monotonic()
+        ok = False
+        try:
+            result = self._request_once(
+                method,
+                path,
+                body=body,
+                headers=headers,
+                authenticated=authenticated,
+                max_response_bytes=max_response_bytes,
+                timeout=timeout,
+            )
+            ok = True
+            return result
+        except RoleServiceHttpError as error:
+            # The service answered: the link itself worked.
+            ok = error.status < 500
+            raise
+        finally:
+            _observe_request(path, started, ok)
+
+    def _request_once(
         self,
         method: str,
         path: str,
