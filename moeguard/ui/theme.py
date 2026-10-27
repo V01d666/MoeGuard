@@ -88,10 +88,14 @@ def button_qss(role: str = "normal") -> str:
     """
     if role == "accent":
         bg, hover, pressed, fg = ACCENT, ACCENT_HOVER, ACCENT_PRESSED, "#FFFFFF"
-        border = "none"
+        # Same 1px box as a bordered "normal" button (the background shows
+        # through), so mixed rows line up instead of differing by 2px.
+        border = "1px solid transparent"
     elif role == "danger":
         bg, hover, pressed, fg = DANGER, DANGER_HOVER, DANGER_PRESSED, "#FFFFFF"
-        border = "none"
+        # Same 1px box as a bordered "normal" button (the background shows
+        # through), so mixed rows line up instead of differing by 2px.
+        border = "1px solid transparent"
     else:
         bg, hover, pressed, fg = PANEL_BG, SECTION_BG, BORDER, TEXT_PRIMARY
         border = f"1px solid {BORDER_STRONG}"

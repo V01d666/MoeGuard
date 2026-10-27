@@ -1,14 +1,21 @@
-"""首次启动气泡式引导（M4 重写）。
+"""首次启动气泡式引导（M4 重写；v0.4.1 拆成两种）。
 
 将 QWizard 改为轻量气泡式引导，悬浮在桌宠头上。
 透明无边框小窗口，定位在桌宠上方，显示引导文字 + 操作按钮。
 不阻塞主线程，桌宠保持可见。
 
-步骤（非 modal，每步一个气泡）:
-  Step 1: 值守风险告知 + 主动同意 / 仅使用桌宠
+mode="intro"（首次启动，只出现一次）:
+  Step 0: 一句话介绍 + [知道了]
+
+mode="patrol"（用户要进入值守、或从托盘打开值守设置时）:
+  Step 1: 值守风险告知 + 主动同意 / 仅使用桌宠（已有本版本同意时从 Step 2 开始）
   Step 2: 询问是否注册主人脸 + [好呀] [跳过]
   Step 3 (如果选好呀): 摄像头预览 + [拍一张] -> 等待注册结果
   Step 4: 完成提示 + [完成]
+
+结束时 ``outcome`` 记录用户怎么结束的（埋点用，只有枚举值）：
+intro → acknowledged / closed；patrol → declined / owner_skipped /
+owner_registered / closed。
 """
 
 from __future__ import annotations
@@ -97,8 +104,13 @@ QWidget#onboardingBubble QScrollBar::sub-line:vertical {{
 }}
 """
 
+# 首次启动只说一句：桌宠能做什么、入口在哪
+# 手动在第二个逗号后换行：按宽度自动折行会把「做你 / 自己的桌宠」拆开
+INTRO_TEXT = "拖我换位置，右键打开桌宠工坊，\n做你自己的桌宠"
+
 # 引导文字
 _STEP_TEXTS: dict[int, str] = {
+    0: INTRO_TEXT,
     1: (
         "值守会使用摄像头并在本机保存陌生人证据；仅建议用于你自己的"
         "私密空间。它不是专业安防，设备睡眠或部分电池待机场景会中断。"
@@ -131,8 +143,17 @@ class OnboardingBubble(QWidget):
         self,
         pet_window: QWidget,
         parent: QWidget | None = None,
+        *,
+        mode: str = "patrol",
+        start_step: int = 1,
     ) -> None:
         super().__init__(parent)
+        if mode not in ("intro", "patrol"):
+            raise ValueError(f"unknown onboarding mode: {mode!r}")
+        self.mode = mode
+        # 埋点用的结束方式；None = 尚未结束
+        self.outcome: str | None = None
+        self._done = False
         self._pet = pet_window
         self.setObjectName("onboardingBubble")
         self.setWindowFlags(
@@ -204,7 +225,10 @@ class OnboardingBubble(QWidget):
         self._pet.installEventFilter(self)
 
         # 显示第一步
-        self._show_step(1)
+        if mode == "intro":
+            self._show_step(0)
+        else:
+            self._show_step(2 if start_step == 2 else 1)
 
     # ------------------------------------------------------------------ #
     # 定位与绑定
@@ -296,7 +320,10 @@ class OnboardingBubble(QWidget):
         self._label.setFixedSize(content_width, max(32, content_height))
         self._text_scroll.setFixedHeight(min(68, max(32, content_height)))
 
-        if step == 1:
+        if step == 0:
+            self._preview.setHidden(True)
+            self._add_button("知道了", self._on_intro_acknowledged)
+        elif step == 1:
             self._preview.setHidden(True)
             self._add_button("我已知悉，继续", self._on_consent_granted)
             self._add_button("仅使用桌宠", self._on_consent_declined, is_skip=True)
@@ -359,6 +386,10 @@ class OnboardingBubble(QWidget):
     # 步骤回调
     # ------------------------------------------------------------------ #
 
+    def _on_intro_acknowledged(self) -> None:
+        """首次介绍：点「知道了」。"""
+        self._complete("acknowledged")
+
     def _on_consent_granted(self) -> None:
         """用户明确知悉风险后才允许进入注册/值守流程。"""
         self.consent_granted.emit()
@@ -367,7 +398,7 @@ class OnboardingBubble(QWidget):
     def _on_consent_declined(self) -> None:
         """拒绝采集：纯桌宠继续可用，不进入注册或自动值守。"""
         self.consent_declined.emit()
-        self._on_finish()
+        self._complete("declined")
 
     def _on_choose_register(self) -> None:
         """用户选择注册主人脸 -> 进入 Step 3。"""
@@ -407,10 +438,21 @@ class OnboardingBubble(QWidget):
         self._clear_buttons()
         self._add_button("重新拍一张", self._on_capture)
 
+    def _owner_outcome(self) -> str:
+        return "owner_registered" if self._owner_registered else "owner_skipped"
+
     def _on_finish(self) -> None:
-        """引导完成。"""
+        """完成页点「完成」。"""
+        self._complete(self._owner_outcome())
+
+    def _complete(self, outcome: str) -> None:
+        """引导结束（只发射一次 finished）。"""
+        if self._done:
+            return
+        self._done = True
+        self.outcome = outcome
         # 形象路径为空（MVP 使用默认形象）
-        self._step = 4  # closeEvent 不再把已完成流程误报为“跳过”
+        self._step = 4  # 保持旧语义：closeEvent 不再把已完成流程误报为“跳过”
         self.finished.emit("")
         self.close()
 
@@ -437,7 +479,12 @@ class OnboardingBubble(QWidget):
     # ------------------------------------------------------------------ #
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        """关闭事件：如果尚未完成，发射 finished 空路径（视为跳过）。"""
-        if self._step < 4:
+        """关闭事件：尚未结束时也发射 finished；已到完成页的保留真实结果。"""
+        if not self._done:
+            self._done = True
+            if self.mode == "patrol" and self._step == 4:
+                self.outcome = self._owner_outcome()
+            else:
+                self.outcome = "closed"
             self.finished.emit("")
         super().closeEvent(event)

@@ -60,6 +60,13 @@ class ConsentConfig:
 
 
 @dataclass(frozen=True)
+class OnboardingConfig:
+    """首次引导是否看过（v0.4.1 起）；与值守同意分开保存，互不推断。"""
+
+    basic_done: bool = False
+
+
+@dataclass(frozen=True)
 class CameraConfig:
     """摄像头配置。
 
@@ -161,6 +168,7 @@ class AppConfig:
 
     presence: PresenceConfig = field(default_factory=PresenceConfig)
     consent: ConsentConfig = field(default_factory=ConsentConfig)
+    onboarding: OnboardingConfig = field(default_factory=OnboardingConfig)
     camera: CameraConfig = field(default_factory=CameraConfig)
     evidence: EvidenceConfig = field(default_factory=EvidenceConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
@@ -240,6 +248,19 @@ class AppConfig:
                 config,
                 consent=ConsentConfig(**consent_values),
             )
+
+        # 能读到配置文件说明某个版本已运行过；v0.4.1 以前每次首启都弹引导，
+        # 所以缺这一节（或值无效）的升级用户视为已看过，不再重看。
+        onboarding_data = data.get("onboarding")
+        basic_done = (
+            onboarding_data.get("basic_done") if isinstance(onboarding_data, dict) else None
+        )
+        config = replace(
+            config,
+            onboarding=OnboardingConfig(
+                basic_done=basic_done if isinstance(basic_done, bool) else True
+            ),
+        )
 
         camera_data = data.get("camera", {})
         if camera_data:

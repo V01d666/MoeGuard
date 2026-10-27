@@ -210,6 +210,9 @@ class MoeGuardApp(QObject):
         self._custom_role_workbench_dialog: QDialog | None = None
         self._role_credit_dialog: QDialog | None = None
         self._mailbox_dialog: QDialog | None = None
+        # v0.4.1：后台信箱检查（由 role_main 注入）与托盘上的未读数
+        self._mailbox_watcher = None
+        self._mailbox_unread = 0
         self._shutdown_started = False
 
     # ------------------------------------------------------------------ #
@@ -451,6 +454,8 @@ class MoeGuardApp(QObject):
         self._tray.set_custom_role_workbench_available(
             self._custom_role_workbench_factory is not None
         )
+        self._tray.set_mailbox_available(self._mailbox_dialog_factory is not None)
+        self._tray.set_mailbox_unread(self._mailbox_unread)
 
         # 14. 锁屏监听
         self._lock_monitor = LockScreenMonitor()
@@ -470,10 +475,8 @@ class MoeGuardApp(QObject):
         # 17. 启动 idle 动画（先让桌宠可见，引导在桌宠之上弹出）
         self._feedback.on_companion()
 
-        # 18. 首次启动 -> 显示引导（桌宠已在背后运行）
-        if not self._owner.is_registered() or not self._has_patrol_consent():
-            logger.info("首次启动，显示引导向导")
-            self._show_onboarding()
+        # 18. 首次启动 -> 只弹一句介绍；值守告知等用户要用值守时再出现
+        self._maybe_show_first_run()
 
         # 19. 显示桌宠窗口 + 托盘
         self._pet_window.show()
@@ -684,7 +687,7 @@ class MoeGuardApp(QObject):
             except Exception:
                 logger.exception("恢复上一个桌宠角色失败")
             return False, str(exc)
-        return True, f"已切换为 {installed.package.display_name} v{key.package_version}"
+        return True, f"已切换为 {installed.display_name} v{key.package_version}"
 
     def _wire_signals(self) -> None:
         """接线所有子系统信号。"""
@@ -728,6 +731,8 @@ class MoeGuardApp(QObject):
         )
         self._tray.open_security_setup.connect(self._on_open_security_setup)
         self._tray.open_evidence.connect(self._on_open_evidence)
+        self._tray.open_mailbox.connect(lambda: self._on_open_mailbox("tray"))
+        self._tray.message_clicked.connect(self._on_tray_message_clicked)
         self._tray.tray_activated.connect(self._on_tray_activated)
 
         # 桌宠交互 -> 反馈 + dogfood 埋点
@@ -1083,8 +1088,7 @@ class MoeGuardApp(QObject):
         assert self._state_machine is not None
         if start:
             if not self._can_start_patrol():
-                assert self._tray is not None
-                self._tray.show_message("无法开始值守", "请先完成风险同意和主人注册。")
+                self._request_patrol_setup("tray")
                 return
             self._patrol_trigger = "manual"
             self._state_machine.on_manual_start()
@@ -1172,7 +1176,7 @@ class MoeGuardApp(QObject):
         dialog.role_credit_dialog_requested.connect(
             self._on_open_role_credit_dialog
         )
-        dialog.mailbox_requested.connect(self._on_open_mailbox)
+        dialog.mailbox_requested.connect(lambda: self._on_open_mailbox("settings"))
         self._settings_dialog = dialog
 
         def finish_settings(result: int) -> None:
@@ -1265,6 +1269,9 @@ class MoeGuardApp(QObject):
             return
         dialog = factory()
         self._custom_role_workbench_dialog = dialog
+        renamed = getattr(dialog, "role_renamed", None)
+        if renamed is not None:
+            renamed.connect(self._on_role_renamed)
 
         def finish_workbench(_result: int) -> None:
             if self._custom_role_workbench_dialog is dialog:
@@ -1299,10 +1306,21 @@ class MoeGuardApp(QObject):
         dialog.raise_()
         dialog.activateWindow()
 
-    def _on_open_mailbox(self) -> None:
+    def _on_role_renamed(self, _key: object) -> None:
+        if self._settings_dialog is not None:
+            self._settings_dialog.refresh_role_names()
+
+    def _on_open_mailbox(self, entrypoint: str = "settings") -> None:
         factory = self._mailbox_dialog_factory
         if factory is None:
             return
+        opened: dict[str, object] = {
+            "entrypoint": entrypoint,
+            "unread_count": min(1000, max(0, self._mailbox_unread)),
+        }
+        if entrypoint == "settings":
+            opened = {"screen": "settings", **opened}
+        self._record_app_event("mailbox_opened", opened)
         if self._mailbox_dialog is not None:
             self._mailbox_dialog.show()
             self._mailbox_dialog.raise_()
@@ -1310,6 +1328,9 @@ class MoeGuardApp(QObject):
             return
         dialog = factory()
         self._mailbox_dialog = dialog
+        unread_changed = getattr(dialog, "unread_changed", None)
+        if unread_changed is not None:
+            unread_changed.connect(self._set_mailbox_unread)
 
         def finish_mailbox(_result: int) -> None:
             if self._mailbox_dialog is dialog:
@@ -1321,6 +1342,38 @@ class MoeGuardApp(QObject):
         dialog.raise_()
         dialog.activateWindow()
 
+    def _set_mailbox_unread(self, count: int) -> None:
+        """信箱未读数 -> 托盘菜单「信箱（N）…」。"""
+        self._mailbox_unread = max(0, int(count))
+        if self._tray is not None:
+            self._tray.set_mailbox_unread(self._mailbox_unread)
+
+    def _on_new_mail(self, items) -> None:
+        """后台检查发现新公告或作者回复：只提示一次，点气泡打开信箱。"""
+        items = tuple(items or ())
+        if not items:
+            return
+        announcements = [item for item in items if item.kind == "announcement"]
+        if self._tray is not None:
+            if announcements:
+                title = "萌卫有新公告"
+                message = announcements[0].title
+                if len(items) > 1:
+                    message += f" 等 {len(items)} 条"
+            else:
+                title = "作者回复了你的留言"
+                message = "点这里打开信箱查看"
+            self._tray.show_message(title, message, 8000, tag="mailbox")
+        for item in announcements:
+            if item.announcement_id:
+                self._record_app_event(
+                    "announcement_received", {"announcement_id": item.announcement_id}
+                )
+
+    def _on_tray_message_clicked(self, tag: str) -> None:
+        if tag == "mailbox":
+            self._on_open_mailbox("notification")
+
     def _on_open_security_setup(self) -> None:
         """允许拒绝过引导的用户从托盘重新作出主动同意。"""
         assert self._state_machine is not None
@@ -1328,9 +1381,7 @@ class MoeGuardApp(QObject):
         if self._state_machine.is_patrolling:
             self._tray.show_message("请先结束值守", "回到陪伴模式后可重新进行值守设置。")
             return
-        if self._onboarding is not None and self._onboarding.isVisible():
-            return
-        self._show_onboarding()
+        self._show_onboarding(mode="patrol", entrypoint="tray")
 
     def _on_open_evidence_manager(self) -> None:
         """从设置打开可撤销/可见的本地证据管理窗口。"""
@@ -1550,11 +1601,14 @@ class MoeGuardApp(QObject):
             self._state_machine.on_manual_stop()
         else:
             if not self._can_start_patrol():
-                assert self._tray is not None
-                self._tray.show_message("无法开始值守", "请先完成风险同意和主人注册。")
+                self._request_patrol_setup("pet_menu")
                 return
             self._patrol_trigger = "manual"
             self._state_machine.on_manual_start()
+
+    def _request_patrol_setup(self, entrypoint: str) -> None:
+        """用户要进入值守但缺同意或主人档案：就地打开值守设置，完成注册后直接开始。"""
+        self._show_onboarding(mode="patrol", entrypoint=entrypoint, start_patrol=True)
 
     def _has_patrol_consent(self) -> bool:
         """当前配置是否含本版本的主动值守同意。"""
@@ -1600,18 +1654,89 @@ class MoeGuardApp(QObject):
     # 引导
     # ------------------------------------------------------------------ #
 
-    def _show_onboarding(self) -> None:
-        """显示首次启动气泡式引导（悬浮在桌宠上方，与桌宠绑定移动）。"""
+    def _maybe_show_first_run(self) -> None:
+        """首次启动只弹一次介绍气泡（与值守同意分开记录）。"""
+        assert self._config is not None
+        if self._config.onboarding.basic_done:
+            return
+        logger.info("首次启动，显示介绍气泡")
+        self._show_onboarding(mode="intro", entrypoint="startup")
+
+    def _show_onboarding(
+        self,
+        mode: str = "patrol",
+        *,
+        entrypoint: str = "tray",
+        start_patrol: bool = False,
+    ) -> None:
+        """显示气泡式引导（悬浮在桌宠上方，与桌宠绑定移动）。
+
+        mode="intro" 是首次介绍；mode="patrol" 是值守风险告知 + 主人注册。
+        start_patrol=True 表示用户刚点了「进入值守」，注册成功后直接开始。
+        """
         assert self._pet_window is not None
 
-        self._onboarding = OnboardingBubble(self._pet_window)
-        self._onboarding.finished.connect(self._on_onboarding_finished)
-        self._onboarding.consent_granted.connect(self._on_patrol_consent_granted)
-        self._onboarding.consent_declined.connect(self._on_patrol_consent_declined)
-        self._onboarding.preview_requested.connect(self._on_preview_requested)
-        self._onboarding.register_owner.connect(self._on_register_owner_from_onboarding)
-        self._onboarding.show()
-        logger.info("气泡式引导已显示")
+        current = self._onboarding
+        if current is not None and current.isVisible():
+            if current.mode == mode:
+                current.raise_()
+                return
+            # 值守设置优先：关掉还开着的首次介绍（记为 closed）
+            current.close()
+
+        start_step = 2 if mode == "patrol" and self._has_patrol_consent() else 1
+        bubble = OnboardingBubble(self._pet_window, mode=mode, start_step=start_step)
+        bubble.setProperty("moeguard_entrypoint", entrypoint)
+        bubble.setProperty("moeguard_start_patrol", bool(start_patrol))
+        self._onboarding = bubble
+        bubble.finished.connect(self._on_onboarding_finished)
+        bubble.finished.connect(lambda _path, b=bubble: self._on_onboarding_bubble_finished(b))
+        bubble.consent_granted.connect(self._on_patrol_consent_granted)
+        bubble.consent_declined.connect(self._on_patrol_consent_declined)
+        bubble.preview_requested.connect(self._on_preview_requested)
+        bubble.register_owner.connect(self._on_register_owner_from_onboarding)
+        bubble.show()
+        logger.info("气泡式引导已显示（%s，入口=%s）", mode, entrypoint)
+
+    def _on_onboarding_bubble_finished(self, bubble: OnboardingBubble) -> None:
+        """记录引导怎么结束的；首次介绍记为已看过；按需开始值守。"""
+        outcome = bubble.outcome or "closed"
+        if bubble.mode == "intro":
+            assert self._config is not None
+            if not self._config.onboarding.basic_done:
+                self._config = dc_replace(
+                    self._config,
+                    onboarding=dc_replace(self._config.onboarding, basic_done=True),
+                )
+                self._persist_config("首次引导", notify=False)
+            self._record_app_event("onboarding_finished", {"onboarding_outcome": outcome})
+            return
+        self._record_app_event(
+            "patrol_setup_finished",
+            {
+                "entrypoint": str(bubble.property("moeguard_entrypoint") or "tray"),
+                "patrol_setup_outcome": outcome,
+            },
+        )
+        if (
+            outcome == "owner_registered"
+            and bubble.property("moeguard_start_patrol")
+            and self._state_machine is not None
+            and not self._state_machine.is_patrolling
+            and self._can_start_patrol()
+        ):
+            self._patrol_trigger = "manual"
+            self._state_machine.on_manual_start()
+
+    def _record_app_event(self, event_name: str, properties: dict[str, object]) -> None:
+        """App 级埋点；没有配置服务或埋点失败都不影响功能。"""
+        telemetry = getattr(self, "_telemetry", None)
+        if telemetry is None:
+            return
+        try:
+            telemetry.record_event(event_name, properties)
+        except Exception as exc:  # noqa: BLE001 - telemetry never affects the app
+            logger.debug("埋点失败（%s）: %s", event_name, exc)
 
     def _on_preview_requested(self) -> None:
         """引导进入 Step 3：启动摄像头预览（不阻塞）。"""

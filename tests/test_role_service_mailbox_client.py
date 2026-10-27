@@ -167,12 +167,13 @@ def test_unread_announcements_filtering_plain_text_and_restart(tmp_path):
     dialog.refresh()
     _wait(dialog)
     assert dialog.inbox.count() == 2 and dialog.announcements.count() == 1
-    assert dialog.tabs.tabText(0).endswith("(2)")
-    assert dialog.tabs.tabText(1).endswith("(1)")
+    # v0.4.1: tab labels carry the unread count (none when all read).
+    assert dialog.tabs.tabText(0) == "留言与回复 (1)"
+    assert dialog.tabs.tabText(1) == "公告 (1)"
     assert unread_counts[-1] == 2
     dialog.inbox.setCurrentRow(0)
     assert dialog.detail.toPlainText().startswith("<b>")
-    assert dialog.tabs.tabText(0).endswith("(2)")
+    assert dialog.tabs.tabText(0) == "留言与回复"
     assert unread_counts[-1] == 1
     raw = (tmp_path / "read.json").read_bytes()
     assert b"plain reply" not in raw and b"test-account" not in raw and b"mm_a" not in raw
@@ -180,15 +181,15 @@ def test_unread_announcements_filtering_plain_text_and_restart(tmp_path):
     restarted, _ = _dialog(tmp_path)
     restarted.refresh()
     _wait(restarted)
-    assert restarted.tabs.tabText(0).endswith("(2)")
-    assert restarted.tabs.tabText(1).endswith("(1)")
+    assert restarted.tabs.tabText(0) == "留言与回复"  # the read reply stays read
+    assert restarted.tabs.tabText(1) == "公告 (1)"
     restarted.mark_all_button.click()
-    assert restarted.tabs.tabText(1).endswith("(1)")
-    assert all(not restarted.inbox.item(i).text().startswith("[未读]")
+    assert restarted.tabs.tabText(1) == "公告"
+    assert all(not restarted.inbox.item(i).font().bold()
                for i in range(restarted.inbox.count()))
     restarted.clear_read_button.click()
     assert not (tmp_path / "read.json").exists()
-    assert restarted.tabs.tabText(0).endswith("(2)")
+    assert restarted.tabs.tabText(0) == "留言与回复 (1)"
     restarted.close()
 
 
@@ -211,7 +212,7 @@ def test_connection_arriving_during_public_refresh_loads_the_authenticated_threa
         QApplication.processEvents()
         time.sleep(.005)
     _wait(dialog)
-    assert dialog.inbox.count() == 2 and dialog.tabs.tabText(0).endswith("(2)")
+    assert dialog.inbox.count() == 2 and dialog.tabs.tabText(0) == "留言与回复 (1)"
     dialog.composer.setPlainText("test")
     assert dialog.send_button.isEnabled()
     dialog.close()

@@ -448,7 +448,7 @@ def test_mvp_settings_hide_cloud_and_never_probe_camera(monkeypatch) -> None:
     assert camera_opens == []
     assert dialog.camera_index.currentData() == 7
     labels = [dialog._tabs.tabText(index) for index in range(dialog._tabs.count())]
-    assert labels == ["安防", "通用"]
+    assert labels == ["通用", "安防"]
     dialog.close()
     assert qt_app is not None
 
@@ -498,7 +498,6 @@ def test_settings_replaces_a_missing_managed_role_with_lumen() -> None:
         button.width() for button in row
     ) <= 1
     assert dialog.role_credit_button.height() == row[0].height()
-    assert "提示词、参考图片与生成结果" in dialog.role_pilot_notice_label.text()
     dialog.close()
 
 

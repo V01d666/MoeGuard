@@ -687,14 +687,7 @@ class PetWindow(QWidget):
 
         menu = QMenu(self)
 
-        act_quit = menu.addAction("退出萌卫")
-        act_quit.triggered.connect(self.quit_requested.emit)
-
-        menu.addSeparator()
-
-        act_patrol = menu.addAction("进入值守 / 回到陪伴")
-        act_patrol.triggered.connect(self.toggle_patrol_requested.emit)
-
+        # v0.4.1：桌宠工坊放最前（做自己的桌宠是主功能），退出放最后。
         if self._custom_role_workbench_available:
             act_custom_role = menu.addAction("桌宠工坊…")
             act_custom_role.triggered.connect(
@@ -703,6 +696,16 @@ class PetWindow(QWidget):
 
         act_settings = menu.addAction("设置")
         act_settings.triggered.connect(self.settings_requested.emit)
+
+        menu.addSeparator()
+
+        act_patrol = menu.addAction("进入值守 / 回到陪伴")
+        act_patrol.triggered.connect(self.toggle_patrol_requested.emit)
+
+        menu.addSeparator()
+
+        act_quit = menu.addAction("退出萌卫")
+        act_quit.triggered.connect(self.quit_requested.emit)
 
         return menu
 

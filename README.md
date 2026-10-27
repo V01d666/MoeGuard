@@ -3,6 +3,9 @@
 </p>
 
 <p align="center">
+  <a href="https://moeproject.net">
+    <img src="https://img.shields.io/badge/%E5%AE%98%E7%BD%91-moeproject.net-1E8BFF?style=for-the-badge" alt="官网 · moeproject.net">
+  </a>
   <a href="https://ifdian.net/a/moeguard">
     <img src="https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-%E6%94%AF%E6%8C%81%E8%90%8C%E5%8D%AB-946CE6?style=for-the-badge" alt="爱发电 · 支持萌卫">
   </a>
@@ -25,7 +28,7 @@
 - 想亲手做一只，却被建模和动画劝退？
 - 总觉得桌宠只会卖萌，派不上什么用场？
 
-那就来[试试萌卫](https://github.com/V01d666/MoeGuard/releases)吧！
+那就先去[萌卫官网](https://moeproject.net)和它玩一会儿，喜欢再[领回家](#马上开玩)吧！
 
 写一段描述或者丢一张图，就能做出只属于你的桌宠，连动作都能自己生成；看腻了，随时给它换个造型
 
@@ -33,55 +36,34 @@
 
 它不是披着桌宠外衣的安防设备，更像一位偶尔认真过头的小搭档：平时陪你，必要时顺手看家
 
-<p align="center">
-  <img src=".github/assets/baseCharas.png" alt="初始三角色：Lumen、Poppy、Rook" width="100%">
-  <br>
-  <sub>初始三角色：<a href="resources/roles/lumen/idle/0001.png">Lumen</a> · <a href="resources/roles/poppy/idle/0001.png">Poppy</a> · <a href="resources/roles/rook/idle/0001.png">Rook</a></sub>
-</p>
-
 ## 现在的萌卫
 
 - 🎨 **桌宠工坊**：一段文字或一张图就能生成立绘，选中心仪的那张再让它动起来；除了待机，想要哪些动作随你挑
-- 🔁 **常换常新**：装好的角色随时补动作、换动作，甚至整个重新设计，旧版本都会留着
+- 🔁 **常换常新**：装好的角色随时补动作、换动作、改名字，甚至整个重新设计，旧版本都会留着
 - ⏳ **不用干等**：进度和预计时间一目了然，走开也没关系，做好了托盘和桌宠都会喊你回来
 - 📦 **随身带走**：角色能导出成文件夹备份，换台电脑也能原样导入
 - 🐾 **开箱即玩**：Lumen、Poppy、Rook 三位角色随时待命，拎起来、拖着走都有反应，还会欢迎你回来、扒着屏幕边缘探头
+- 📬 **消息不漏**：公告和作者回复会在右下角提醒你，托盘里点「信箱…」就能看
 - 🛡️ **顺手看家**：手动开启，或授权后随锁屏自动上岗；有陌生人或异动就在本地留下截图和短视频，托盘、右键、老板键一键叫停，出了状况会老实停下，绝不假装还在站岗
 
 ## 马上开玩
 
-下载 **Windows x64 稳定安装版（推荐）**，双击安装就能开玩，不用装 Python
+下载 **Windows x64 安装版**，双击安装就能开玩，不用装 Python
 
-以后可以在设置里检查更新，确认后安装并重启；已有配置、角色和工坊记录会保留
+有新版本时萌卫会提醒你，点「更新」就好，什么都不用重新下载；角色、设置、额度和工坊记录都会保留
 
-三个渠道提供同一个安装包，任选一个即可：
+| 🌐 官网直链 | 🐙 GitHub Releases |
+| :---: | :---: |
+| [官网安装包直链](https://api.moeproject.net/updates/windows/stable/MoeGuard-Setup.exe) | [GitHub 安装版](https://github.com/V01d666/MoeGuard/releases/latest/download/MoeGuard-Setup.exe) |
 
-| 🐙 GitHub Releases | 🌐 官网直链 | ☁️ 百度网盘 |
-| :---: | :---: | :---: |
-| [GitHub 稳定安装版](https://github.com/V01d666/MoeGuard/releases/latest/download/MoeGuard-Setup.exe) | [官网安装包直链](https://api.moeproject.net/updates/windows/stable/MoeGuard-Setup.exe) | [百度网盘下载](https://pan.baidu.com/s/1K_EUUpXF-CR2h0dJ_Dlr7g?pwd=moeg) |
-
-只养桌宠用不到摄像头。第一次启动会讲清楚值守的风险，你可以只养桌宠，看家功能随时再到设置里开启
+只养桌宠用不到摄像头；第一次开启看家时，萌卫会先讲清楚风险、征得你的同意
 
 <details>
-<summary>📦 免安装版本</summary>
-
-下载 Portable ZIP，完整解压后双击 `MoeGuard.exe`
-
-**后续需要手动下载最新版才能体验新功能和优化改进，强烈建议使用安装版 (｡•̀ᴗ-)✧**
-
-| 🐙 GitHub Releases | 🌐 官网直链 | ☁️ 百度网盘 |
-| :---: | :---: | :---: |
-| [GitHub 免安装 ZIP](https://github.com/V01d666/MoeGuard/releases/download/v0.4.0/MoeGuard-0.4.0-win-Portable.zip) | [官网免安装 ZIP 直链](https://api.moeproject.net/updates/windows/stable/MoeGuard-Portable.zip) | [百度网盘免安装版](https://pan.baidu.com/s/1089PgfbfbggP7I0Ld2wDFQ?pwd=moeg) |
-
-</details>
-
-<details>
-<summary>🔎 文件校验（v0.4.0）</summary>
+<summary>🔎 文件校验（v0.4.1）</summary>
 
 | 文件 | 字节数 | SHA-256 |
 | --- | ---: | --- |
-| `MoeGuard-Setup.exe` | 206577756 | `316cde63faed3e4f10b3860d06a2c73a49543aa0e4f44c87e62a573010c16b96` |
-| `MoeGuard-0.4.0-win-Portable.zip` | 198851273 | `0047bf7c83b24d41b342ba0dc74e78637112326c04c156147673f4d7dd127dd4` |
+| `MoeGuard-Setup.exe` | 210486726 | `dd5b0d75b6754187d12097e3d81b2c6d99acb4609511f7e717effadbadb3106f` |
 
 </details>
 
@@ -102,10 +84,11 @@ py -3.12 -m venv .venv
 
 ### 🎟️ 想试试桌宠工坊？
 
-自带角色和看家功能都不需要兑换码。桌宠工坊在云端生成，按“立绘生成”和“动作生成”分别计次，次数目前只能通过兑换码获得，暂未开放购买。兑换码会不定期在[爱发电主页](https://ifdian.net/a/moeguard)随活动发放，记得常来蹲一蹲～拿到码后，到“设置 → 查看次数 / 兑换码…”里兑换就好
+萌卫本体免费，自带角色和看家功能都可以直接用。桌宠工坊在云端生成，按“立绘生成”和“动作生成”分别计算额度：新用户第一次打开就会获赠一份体验额度，够做一只完整的桌宠；用完之后可以用兑换码补充，兑换码在[爱发电](https://ifdian.net/a/moeguard)获取，到“设置 → 通用 → 查看次数 / 兑换码…”里兑换就好
 
 ## 项目时间线
 
+- [2026/10/26] 🌐 [萌卫官网](https://moeproject.net)正式上线！不用安装，网页里就能先和桌宠戳一戳、拎起来、看它探头，还有像聊天一样的上手教程；[v0.4.1](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.1) 也同步发布，信箱提醒、角色改名等小改进一起送到
 - [2026/10/18] 🎉 [MoeGuard v0.4.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.0) 正式发布！服务连接与生成次数自动刷新，次数不足提示更清楚，升级后保留原支持编号
 - [2026/10/08] 🎉 [MoeGuard v0.3.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.3.0) 正式发布！安装版支持原地更新，新增内置信箱与支持编号，设置页也能查看当前版本
 - [2026/09/24] 🎉 [MoeGuard v0.2.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0) 正式发布！桌宠工坊总算是能上桌了，还带来了生成进度与预计等待、完成提醒，以及角色导出和导入
@@ -125,18 +108,17 @@ py -3.12 -m venv .venv
 - 🎁 **一键分享**：把角色打包成一个文件，发给朋友直接导入
 - 📡 **远程告警**：看家时一有动静，第一时间推送到你的手机，出门在外也安心
 
-饼先画在这里，但只有真正做好、测过、能下载体验的功能才会搬进“现在的萌卫”。进度会在 GitHub 和[爱发电](https://ifdian.net/a/moeguard)同步更新
+饼先画在这里，但只有真正做好、测过、能下载体验的功能才会搬进“现在的萌卫”。进度会在 GitHub、[官网](https://moeproject.net)和[爱发电](https://ifdian.net/a/moeguard)同步更新
 
 <details>
-<summary>🔒 摄像头、云端生成与数据处理说明</summary>
+<summary>🔒 摄像头与数据</summary>
 
-- **摄像头**：只在主人注册和值守时开启；人脸特征、画面和证据留在本机，值守证据默认保留 7 天
-- **联网与更新**：启动时建立或复用匿名服务凭据和支持编号，网络恢复后自动重连；连接失败仍能养桌宠。更新请求不携带账号凭据或 Cookie
-- **云端生成**：主动生成时上传文字、参考图和任务素材，服务端按活动批次清理；另有少量使用事件、每日在线心跳和网络耗时统计（安装方式、运行时长、Windows 版本与架构、缩放、角色类型与数量），不含提示词、图片、角色名、本机路径或值守数据
-- **信箱**：确认后才发送留言，诊断默认关闭，仅可附应用版本、Windows 主版本、架构和最近最多 5 个错误码。本机仅保留已读指纹与时间；云端留言目前不会自动删除，删除本机数据也不会删除已发送的留言
-- **停止与删除**：设置里撤回值守同意会停止采集并删除主人特征和证据；完整清除可在退出后删除 `%USERPROFILE%\.moeguard\`，同时会丢失匿名账号凭据
+- **看家画面**：摄像头只在主人注册和值守时打开，人脸特征、画面和证据都只留在本机，值守证据默认保留 7 天
+- **云端生成**：只有你主动生成时才会上传文字和图片，暂存在服务端，按活动批次清理
+- **匿名统计**：只记录少量使用事件、在线心跳和网络快慢，不含提示词、图片、角色名、本机路径或值守数据
+- **随时退出**：撤回值守同意会停止采集并删除主人特征和证据；想彻底清除，退出后删掉 `%USERPROFILE%\.moeguard\` 即可
 
-请在本人设备及他人知情的私人空间使用。识别可能漏检，值守可能因遮挡、摄像头占用或系统睡眠中断；萌卫不能替代系统锁屏或专业安防设备
+客户端代码全部开源，上面每一条都可以对照源码核实。请在本人设备及他人知情的私人空间使用；识别可能漏检，值守也可能因遮挡、摄像头占用或系统睡眠中断，萌卫不能替代专业安防设备
 
 </details>
 

@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListView,
@@ -90,6 +91,7 @@ from moeguard.roles.spec import (
     half_head_reveal_fraction,
 )
 from moeguard.ui import theme
+from moeguard.ui.wheel_guard import guard_wheel
 from moeguard.utils.paths import resource_path
 
 _ACTIVITY_FACES = (
@@ -1439,6 +1441,7 @@ class RoleWorkbenchDialog(QDialog):
     """One-window workbench for creating and revising managed roles."""
 
     install_requested = Signal(object)
+    role_renamed = Signal(object)
     # Emitted from the worker thread when a task is accepted by the service.
     # A bubble is a widget, so it must be built on the UI thread; a direct
     # call from the worker would be a cross-thread widget construction.
@@ -1794,7 +1797,10 @@ class RoleWorkbenchDialog(QDialog):
         self.appearance_button = QPushButton("重新设计形象")
         self.appearance_button.setToolTip("保留旧版本，创建新的可回滚形象版本")
         self.appearance_button.clicked.connect(self._start_selected_appearance_revision)
-        for button in (self.open_role_button, self.appearance_button):
+        self.rename_role_button = QPushButton("重命名…")
+        self.rename_role_button.setToolTip("修改角色名称，所有已安装版本一起更新")
+        self.rename_role_button.clicked.connect(self._rename_selected_role)
+        for button in (self.open_role_button, self.rename_role_button, self.appearance_button):
             button.setFixedHeight(38)
             button.setStyleSheet(theme.button_qss())
         self.edit_role_selector.currentIndexChanged.connect(
@@ -1802,6 +1808,7 @@ class RoleWorkbenchDialog(QDialog):
         )
         edit_role_layout.addWidget(self.edit_role_selector, 1)
         edit_role_layout.addWidget(self.open_role_button)
+        edit_role_layout.addWidget(self.rename_role_button)
         edit_role_layout.addWidget(self.appearance_button)
         self.edit_role_controls.setVisible(False)
         create_stage_layout.addWidget(self.edit_role_controls)
@@ -1843,7 +1850,7 @@ class RoleWorkbenchDialog(QDialog):
         self.home_panel.setVisible(False)
 
         common_form = QFormLayout()
-        self.display_name = QLineEdit("我的桌宠")
+        self.display_name = QLineEdit(self._role_library.suggest_name("我的桌宠"))
         self.display_name.setMaxLength(80)
         self.display_name.setPlaceholderText("例如：DeepSeek 鲸鱼娘")
         self.role_id = QLineEdit(_new_role_id())
@@ -2248,6 +2255,9 @@ class RoleWorkbenchDialog(QDialog):
         ):
             self._show_home()
         self._apply_generation_availability()
+        # Scrolling the workshop must not move the candidate-count slider or
+        # switch the role selector under the pointer.
+        guard_wheel(self)
         if self._connection is not None:
             self._connection.changed.connect(self._sync_connection)
             self._sync_connection()
@@ -2652,7 +2662,7 @@ class RoleWorkbenchDialog(QDialog):
                 continue
             editable, reason = self._role_editability(installed.key)
             self.edit_role_selector.addItem(
-                f"{installed.package.display_name}（v{installed.key.package_version}）"
+                f"{installed.display_name}（v{installed.key.package_version}）"
                 + ("" if editable else " · 仅可运行"),
                 installed.key,
             )
@@ -2694,6 +2704,7 @@ class RoleWorkbenchDialog(QDialog):
             self.edit_role_selector.currentData(_EDITABLE_ROLE_STATUS_ROLE)
         )
         self.open_role_button.setEnabled(self._worker is None and editable)
+        self.rename_role_button.setEnabled(self._worker is None and has_role)
         self.appearance_button.setEnabled(self._worker is None and editable)
         reason = str(
             self.edit_role_selector.currentData(_EDITABLE_ROLE_REASON_ROLE) or ""
@@ -2707,6 +2718,31 @@ class RoleWorkbenchDialog(QDialog):
             )
         )
         self.edit_role_hint.setVisible(has_role and not editable)
+
+    def _rename_selected_role(self) -> None:
+        key = self.edit_role_selector.currentData()
+        if self._worker is not None or not isinstance(key, PackageKey):
+            return
+        try:
+            installed = self._role_library.get(key)
+            prompt = QInputDialog(self)
+            prompt.setWindowTitle("重命名桌宠")
+            prompt.setLabelText("角色名称")
+            prompt.setTextValue(installed.display_name)
+            prompt.setOkButtonText("保存")
+            prompt.setCancelButtonText("取消")
+            prompt.findChild(QLineEdit).setMaxLength(80)
+            if prompt.exec() != QDialog.Accepted:
+                return
+            renamed = self._role_library.rename(key, prompt.textValue())
+        except (OSError, ValueError, RoleContractError) as exc:
+            QMessageBox.warning(self, "无法重命名", str(exc))
+            return
+        self._refresh_editable_roles(key)
+        if self._editing_key is not None and self._editing_key.role_id == key.role_id:
+            self.display_name.setText(renamed.display_name)
+        self.status.setText(f"已重命名为“{renamed.display_name}”。")
+        self.role_renamed.emit(key)
 
     def _new_role_mode_changed(self, checked: bool) -> None:
         if not checked:
@@ -2912,6 +2948,7 @@ class RoleWorkbenchDialog(QDialog):
         self._active_request = request
         self._package_result = PackageResult(installed.root, 0.0)
         self._populate_request_fields(request, input_path)
+        self.display_name.setText(installed.display_name)
         self.role_id.setReadOnly(True)
         self.display_name.setReadOnly(True)
         self.input_tabs.setEnabled(False)
@@ -2950,7 +2987,7 @@ class RoleWorkbenchDialog(QDialog):
         self._update_install_enabled()
         self._set_ui_stage(2)
         self.status.setText(
-            f"正在编辑 {package.display_name} v{key.package_version}。"
+            f"正在编辑 {installed.display_name} v{key.package_version}。"
             "勾选要新增或替换的动作；未勾选动作原样保留。"
         )
 
@@ -2976,6 +3013,7 @@ class RoleWorkbenchDialog(QDialog):
         self._package_result = None
         self._preview_root = None
         self._populate_request_fields(request, input_path)
+        self.display_name.setText(installed.display_name)
         self.role_id.setReadOnly(True)
         self.display_name.setReadOnly(False)
         self.input_tabs.setEnabled(True)
@@ -2995,7 +3033,7 @@ class RoleWorkbenchDialog(QDialog):
         self._mode_changed(self.input_tabs.currentIndex())
         self._update_generation_selection()
         self.status.setText(
-            f"正在基于 {installed.package.display_name} v{key.package_version} "
+            f"正在基于 {installed.display_name} v{key.package_version} "
             f"创建形象修订 r{target_revision}。新形象至少重新生成待机；"
             "旧角色包及其动作不会被复用或改写。"
         )
@@ -3016,7 +3054,7 @@ class RoleWorkbenchDialog(QDialog):
         self.role_id.setReadOnly(True)
         self.role_id.setText(_new_role_id())
         self.display_name.setReadOnly(False)
-        self.display_name.setText("我的桌宠")
+        self.display_name.setText(self._role_library.suggest_name("我的桌宠"))
         self.input_tabs.setEnabled(True)
         self.input_tabs.setCurrentIndex(0)
         self.prepare_button.setText("生成身份候选")
@@ -3066,7 +3104,13 @@ class RoleWorkbenchDialog(QDialog):
             candidate_count = 1
         request = WorkbenchRequest(
             role_id=self.role_id.text().strip(),
-            display_name=self.display_name.text().strip(),
+            display_name=(
+                self._active_request.display_name
+                if self._editing_key is not None and self._active_request is not None
+                else self._role_library.suggest_name(
+                    self.display_name.text(), role_id=self.role_id.text().strip()
+                )
+            ),
             input_mode=mode,
             presentation=presentation,
             style_card="custom",
@@ -3977,6 +4021,9 @@ class RoleWorkbenchDialog(QDialog):
             not busy and self.edit_role_selector.count() > 1
         )
         self.edit_role_selector.setEnabled(not busy)
+        self.rename_role_button.setEnabled(
+            not busy and isinstance(self.edit_role_selector.currentData(), PackageKey)
+        )
         selected_role_editable = bool(
             self.edit_role_selector.currentData(_EDITABLE_ROLE_STATUS_ROLE)
         )
@@ -4182,6 +4229,7 @@ class RoleWorkbenchDialog(QDialog):
             return
         try:
             request = self.request()
+            self.display_name.setText(request.display_name)
             draft = self._save_recoverable_draft(
                 request,
                 appearance_revision=self._target_appearance_revision or 1,
@@ -4933,7 +4981,8 @@ class RoleWorkbenchDialog(QDialog):
         if self._editing_key is None:
             _write_package_identity(self._package_result.package_root, self._active_request)
         folder_name = _package_folder_name(
-            self._active_request.display_name,
+            self._role_library.get(self._package_key).display_name
+            if self._package_key is not None else self._active_request.display_name,
             self._active_request.role_id,
         )
         destination = Path(parent) / folder_name
@@ -4942,8 +4991,15 @@ class RoleWorkbenchDialog(QDialog):
             destination = Path(parent) / f"{folder_name}-{suffix}"
             suffix += 1
         try:
-            _accept_generated_package(self._package_result.package_root)
             shutil.copytree(self._package_result.package_root, destination)
+            _accept_generated_package(destination)
+            if self._package_key is not None:
+                manifest_path = destination / "role.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest["display_name"] = self._role_library.get(self._package_key).display_name
+                manifest_path.write_text(
+                    json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+                )
         except (OSError, ValueError, RoleContractError) as exc:
             QMessageBox.critical(self, "导出失败", str(exc))
             return
@@ -4969,7 +5025,12 @@ class RoleWorkbenchDialog(QDialog):
                     )
                 _accept_generated_package(self._package_result.package_root)
                 installed = self._role_library.install_directory(
-                    self._package_result.package_root
+                    self._package_result.package_root,
+                    display_name=(
+                        self._active_request.display_name
+                        if self._appearance_source_key is not None
+                        and self._active_request is not None else None
+                    ),
                 )
             else:
                 installed = self._role_library.get(self._package_key)
@@ -4985,7 +5046,7 @@ class RoleWorkbenchDialog(QDialog):
         self._result_saved = True
         self.open_installed_role(installed.key)
         self.status.setText(
-            f"{installed.package.display_name} v{installed.key.package_version} "
+            f"{installed.display_name} v{installed.key.package_version} "
             "已安全安装；旧版本仍可在设置中回滚。"
         )
         if package_task_id == self._preview_task_id:

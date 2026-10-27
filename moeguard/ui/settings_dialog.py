@@ -44,9 +44,9 @@ from PySide6.QtWidgets import (
 
 from moeguard.config import AppConfig
 from moeguard.pet.role_assets import discover_bundled_roles
-from moeguard.role_pilot import PILOT_NOTICE_TEXT
 from moeguard.roles import InstalledRole, PackageKey, RoleContractError, RoleLibrary
 from moeguard.ui import theme
+from moeguard.ui.wheel_guard import guard_wheel
 from moeguard.utils.paths import base_dir, resource_path
 from moeguard.utils.version import installed_version
 
@@ -162,9 +162,11 @@ class SettingsDialog(QDialog):
         self._tabs = QTabWidget()
         layout.addWidget(self._tabs)
 
-        self._build_security_tab()
+        # v0.4.1：「通用」在前并默认打开；值守相关（触发、摄像头、证据）都在「安防」。
+        # 「通用」先建：它也创建「安防」页要放的值守触发和摄像头分区。
         # D63/D70：AI 对话和形象生成均未进入 MVP，不得造成“可用”的错觉。
         self._build_general_tab()
+        self._build_security_tab()
 
         self.external_links_footer = QWidget()
         footer_layout = QGridLayout(self.external_links_footer)
@@ -208,6 +210,10 @@ class SettingsDialog(QDialog):
         footer_layout.addWidget(buttons, 0, 2, Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(self.external_links_footer)
 
+        self._tabs.setCurrentIndex(0)
+        # 滚动页面时，鼠标经过的数字框/下拉框不再被滚轮改值。
+        guard_wheel(self)
+
     def _external_link_button(
         self, *, icon_name: str, label: str, url: str
     ) -> QToolButton:
@@ -246,8 +252,11 @@ class SettingsDialog(QDialog):
         page.setContentsMargins(12, 12, 12, 12)
         page.setSpacing(10)
 
+        # 先说值守什么时候开始、用哪个摄像头，再是识别与证据参数，最后是危险区。
+        page.addWidget(self._patrol_frame)
+        page.addWidget(self._camera_frame)
 
-        # 分区 1：识别与证据参数
+        # 分区：识别与证据参数
         param_frame, form = _make_section(
             "识别与证据",
             "识别与证据数据仅保存在本机。",
@@ -281,7 +290,7 @@ class SettingsDialog(QDialog):
 
         self.blur_stranger = QCheckBox("模糊陌生人脸（隐私模式）")
         self.blur_stranger.setChecked(ev.blur_stranger_faces)
-        form.addRow("", self.blur_stranger)
+        form.addRow("隐私", self.blur_stranger)
 
         self.motion_recording_enabled = QCheckBox("画面运动时额外留存证据")
         self.motion_recording_enabled.setChecked(ev.motion_recording_enabled)
@@ -318,7 +327,11 @@ class SettingsDialog(QDialog):
         page.addWidget(danger_frame)
         page.addStretch(1)
 
-        self._tabs.addTab(tab, "安防")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(tab)
+        self._tabs.addTab(scroll, "安防")
 
     # ------------------------------------------------------------------ #
     # 标签页 2: 通用
@@ -370,7 +383,6 @@ class SettingsDialog(QDialog):
         about_layout.addWidget(self.data_folder_button)
         about_layout.addStretch(1)
         about_form.addRow(about_actions)
-        page.addWidget(about_frame)
 
         if self._self_update_available:
             update_frame, update_form = _make_section("应用更新")
@@ -384,9 +396,10 @@ class SettingsDialog(QDialog):
             update_form.addRow(self.update_status_label)
             update_form.addRow(self.auto_update_check_checkbox)
             update_form.addRow(self.check_update_button)
-            page.addWidget(update_frame)
+        else:
+            update_frame = None
 
-        # 分区 1：内置角色与已校验的受管自定义角色版本。
+        # 内置角色与已校验的受管自定义角色版本。
         role_frame, role_form = _make_section("桌宠外观")
         self.role_selector = QComboBox()
         bundled_roles = discover_bundled_roles()
@@ -400,7 +413,7 @@ class SettingsDialog(QDialog):
             installed_roles = ()
         for installed in installed_roles:
             self.role_selector.addItem(
-                f"{installed.package.display_name}（自定义 v{installed.key.package_version}）",
+                f"{installed.display_name}（自定义 v{installed.key.package_version}）",
                 installed.key,
             )
 
@@ -436,14 +449,8 @@ class SettingsDialog(QDialog):
         role_actions_layout.setContentsMargins(0, 0, 0, 0)
         role_actions_layout.setSpacing(8)
         role_action_buttons: list[QPushButton] = []
-        self.import_role_button = QPushButton("导入角色…")
-        self.import_role_button.setToolTip(
-            "选择在桌宠工坊点“保存并导出至…”得到的文件夹，把角色装回本地角色库"
-        )
-        self.import_role_button.setStyleSheet(theme.button_qss("normal"))
-        self.import_role_button.clicked.connect(self._import_role_package)
-        role_action_buttons.append(self.import_role_button)
         if self._custom_role_workbench_available:
+            # 主操作（做自己的桌宠）放在最左。
             self.custom_role_button = QPushButton("桌宠工坊…")
             self.custom_role_button.setStyleSheet(theme.button_qss("accent"))
             self.custom_role_button.setToolTip(
@@ -451,6 +458,13 @@ class SettingsDialog(QDialog):
             )
             self.custom_role_button.clicked.connect(self._open_custom_role_workbench)
             role_action_buttons.append(self.custom_role_button)
+        self.import_role_button = QPushButton("导入角色…")
+        self.import_role_button.setToolTip(
+            "选择在桌宠工坊点“保存并导出至…”得到的文件夹，把角色装回本地角色库"
+        )
+        self.import_role_button.setStyleSheet(theme.button_qss("normal"))
+        self.import_role_button.clicked.connect(self._import_role_package)
+        role_action_buttons.append(self.import_role_button)
         self.remove_role_button = QPushButton("删除所选版本")
         self.remove_role_button.setStyleSheet(theme.button_qss("normal"))
         self.remove_role_button.clicked.connect(self._remove_selected_role)
@@ -468,20 +482,14 @@ class SettingsDialog(QDialog):
             )
             self.role_credit_button.clicked.connect(self._open_role_credit_dialog)
             role_form.addRow("生成服务", self.role_credit_button)
-        if self._custom_role_workbench_available:
-            self.role_pilot_notice_label = QLabel(PILOT_NOTICE_TEXT)
-            self.role_pilot_notice_label.setWordWrap(True)
-            self.role_pilot_notice_label.setProperty("role", "hint")
-            role_form.addRow("内测说明", self.role_pilot_notice_label)
         self.role_selector.currentIndexChanged.connect(
             self._update_role_management_state
         )
         self.role_selector.currentIndexChanged.connect(self._update_role_preview)
         self._update_role_management_state()
         self._update_role_preview()
-        page.addWidget(role_frame)
 
-        # 分区 2：值守触发
+        # 值守触发（显示在「安防」页）
         patrol_frame, patrol_form = _make_section(
             "值守触发",
             "自动值守默认关闭，须先完成风险告知和主人注册。",
@@ -504,15 +512,11 @@ class SettingsDialog(QDialog):
         self.patrol_interval.setSuffix(" 秒")
         self.patrol_interval.setValue(pres.patrol_interval_sec)
         patrol_form.addRow("值守采样间隔", self.patrol_interval)
+        self._patrol_frame = patrol_frame  # 显示在「安防」页
 
-        page.addWidget(patrol_frame)
-
-        # 分区 3：设备与快捷键。设置页不得为枚举设备而打开摄像头；
+        # 摄像头只给值守用，放在「安防」页。设置页不得为枚举设备而打开摄像头；
         # 实际可用性只在主人注册或用户明确开始值守时验证。
-        device_frame, device_form = _make_section(
-            "设备与快捷键",
-            "摄像头仅在注册或值守时打开。",
-        )
+        camera_frame, camera_form = _make_section("摄像头", "摄像头仅在注册或值守时打开。")
 
         self.camera_index = QComboBox()
         camera_indices = sorted({*range(5), cam.device_index})
@@ -520,15 +524,20 @@ class SettingsDialog(QDialog):
             self.camera_index.addItem(f"摄像头 {index}", index)
         selected = self.camera_index.findData(cam.device_index)
         self.camera_index.setCurrentIndex(max(0, selected))
-        device_form.addRow("摄像头", self.camera_index)
+        camera_form.addRow("摄像头", self.camera_index)
+        self._camera_frame = camera_frame  # 显示在「安防」页
 
+        shortcut_frame, shortcut_form = _make_section("快捷键")
         self.stealth_hotkey_edit = QKeySequenceEdit()
         self.stealth_hotkey_edit.setKeySequence(
             QKeySequence(pet.stealth_hotkey)
         )
-        device_form.addRow("老板键（全局隐藏/恢复）", self.stealth_hotkey_edit)
+        shortcut_form.addRow("老板键（全局隐藏/恢复）", self.stealth_hotkey_edit)
 
-        page.addWidget(device_frame)
+        # 主任务（桌宠外观）在最前；支持编号、数据目录这类少用的放最后。
+        for frame in (role_frame, update_frame, shortcut_frame, about_frame):
+            if frame is not None:
+                page.addWidget(frame)
         page.addStretch(1)
 
         scroll = QScrollArea()
@@ -579,6 +588,20 @@ class SettingsDialog(QDialog):
             if self.role_selector.itemData(index) == expected:
                 return index
         return -1
+
+    def refresh_role_names(self) -> None:
+        try:
+            installed_roles = self._role_library.list()
+        except (OSError, ValueError, RoleContractError) as exc:
+            logger.warning("刷新角色名称失败: %s", exc)
+            return
+        for installed in installed_roles:
+            index = self._find_role_item(installed.key)
+            if index >= 0:
+                self.role_selector.setItemText(
+                    index,
+                    f"{installed.display_name}（自定义 v{installed.key.package_version}）",
+                )
 
     def _update_role_preview(self) -> None:
         selected = self.role_selector.currentData()
@@ -657,7 +680,7 @@ class SettingsDialog(QDialog):
         index = self._find_role_item(installed.key)
         if index < 0:
             self.role_selector.addItem(
-                f"{installed.package.display_name}"
+                f"{installed.display_name}"
                 f"（自定义 v{installed.key.package_version}）",
                 installed.key,
             )

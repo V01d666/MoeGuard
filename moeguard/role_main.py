@@ -46,7 +46,10 @@ from moeguard.cloud.role_service_mailbox_client import (  # noqa: E402
     MailboxReadStore,
     mailbox_diagnostics,
 )
-from moeguard.cloud.role_service_mailbox_dialog import MailboxDialog  # noqa: E402
+from moeguard.cloud.role_service_mailbox_dialog import (  # noqa: E402
+    MailboxDialog,
+    MailboxWatcher,
+)
 from moeguard.cloud.role_service_session import RoleServiceSessionStore  # noqa: E402
 from moeguard.cloud.role_workbench import (  # noqa: E402
     RemoteRoleWorkbenchBackend,
@@ -97,6 +100,13 @@ class AppTelemetry(QObject):
 
     def start(self) -> None:
         self.record_daily_active()
+        # Events queued by the previous run (e.g. the exit-time network
+        # sample) otherwise wait for the next recorded event; send them now,
+        # in the background.  A delivery already running makes this a no-op.
+        try:
+            self.reporter.flush_async()
+        except Exception:  # noqa: BLE001 - telemetry never affects the app
+            pass
         self._timer.start()
 
     def tick(self) -> None:
@@ -106,6 +116,14 @@ class AppTelemetry(QObject):
     def shutdown(self) -> None:
         self._timer.stop()
         self.record_network_samples()
+
+    def record_event(self, event_name: str, properties: dict[str, object]) -> bool:
+        """App-level UI events (v0.4.1: onboarding / guard setup / mailbox).
+
+        Callers pass only enum and number properties; ``screen`` defaults to
+        ``runtime`` and ``entrypoint`` to ``startup`` unless given.
+        """
+        return self._record(event_name, properties)
 
     def _record(self, event_name: str, properties: dict[str, object]) -> bool:
         try:
@@ -387,17 +405,50 @@ def configure_role_workbench(
             MailboxReadStore(workspace / "state" / "mailbox-read.json", clock=clock),
             account_id=account_id if transport is not None else "",
             diagnostics=diagnostics, clock=clock,
+            on_announcement_viewed=lambda announcement_id: app._record_app_event(
+                "announcement_viewed", {"announcement_id": announcement_id}
+            ),
         )
         return dialog
 
     app._support_id_provider = stored_account_id
     app._mailbox_dialog_factory = make_mailbox
+    app._mailbox_watcher = None
+    if configured_origin:
+        # v0.4.1: without this nobody ever saw an announcement -- the mailbox
+        # only fetched when opened from Settings.  Check at startup and every
+        # few hours; the tray shows the unread count and one notice per item.
+        def watched_thread() -> tuple[object | None, str]:
+            account_id = stored_account_id()
+            if connection is None or not account_id:
+                return None, ""
+            return connection.transport, account_id
+
+        watcher = MailboxWatcher(
+            HttpRoleServiceTransport(configured_origin, ""),
+            MailboxReadStore(workspace / "state" / "mailbox-read.json", clock=clock),
+            MailboxReadStore(workspace / "state" / "mailbox-notified.json", clock=clock),
+            thread_source=watched_thread,
+            clock=clock,
+        )
+        app._mailbox_watcher = watcher
+        watcher.unread_changed.connect(app._set_mailbox_unread)
+        watcher.new_mail.connect(app._on_new_mail)
+        app.ready.connect(watcher.start)
+        qt_app = QApplication.instance()
+        if qt_app is not None:
+            qt_app.aboutToQuit.connect(watcher.stop)
     if connection is not None:
         def update_open_mailbox(session: object) -> None:
             dialog = app._mailbox_dialog
             account_id = getattr(session, "account_id", "")
             if isinstance(dialog, MailboxDialog) and account_id:
                 dialog.set_connection(connection.transport, account_id)
+            watcher = app._mailbox_watcher
+            if watcher is not None and account_id and not watcher.has_thread:
+                # The startup check ran before the session existed; fetch the
+                # author replies now that it does.
+                watcher.check(force=True)
 
         connection.connected.connect(update_open_mailbox)
 

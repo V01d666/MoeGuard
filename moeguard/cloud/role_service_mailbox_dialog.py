@@ -26,9 +26,11 @@ from PySide6.QtWidgets import (
 
 from moeguard.cloud.role_service_http_client import RoleServiceHttpError
 from moeguard.cloud.role_service_mailbox_client import (
+    ANNOUNCEMENT_ID_RE,
     MailboxReadStore,
     mailbox_diagnostics,
     read_fingerprint,
+    unread_mail,
 )
 from moeguard.cloud.role_service_mailbox_contract import (
     MAX_MESSAGE_CHARS,
@@ -83,6 +85,7 @@ class MailboxDialog(QDialog):
         confirm_send: Callable[[MailboxMessageRequest], bool] | None = None,
         clock: Callable[[], float] = time.time,
         auto_refresh: bool = True,
+        on_announcement_viewed: Callable[[str], None] | None = None,
     ) -> None:
         super().__init__()
         self._public = public_transport
@@ -99,6 +102,9 @@ class MailboxDialog(QDialog):
         self._remaining: int | None = None
         self._rows: dict[str, tuple[str, str, str]] = {}
         self._seen: frozenset[str] = frozenset()
+        # Read receipts: row key -> server announcement ID (receipt-safe only).
+        self._announcement_ids: dict[str, str] = {}
+        self._on_announcement_viewed = on_announcement_viewed
         self.setObjectName("mailboxDialog")
         self.setWindowTitle("信箱 · 萌卫")
         self.resize(700, 650)
@@ -129,16 +135,23 @@ class MailboxDialog(QDialog):
         inbox_layout.addWidget(self.tabs, 1)
         self.detail = QPlainTextEdit()
         self.detail.setReadOnly(True)
+        self.detail.setPlaceholderText("选中一条查看全文")
         self.detail.setMaximumHeight(140)
         inbox_layout.addWidget(self.detail)
         read_bar = QHBoxLayout()
         self.mark_all_button = QPushButton("全部标为已读")
         self.mark_all_button.clicked.connect(self._mark_all)
         read_bar.addWidget(self.mark_all_button)
+        read_bar.addStretch(1)
+        # Rarely needed (privacy clean-up / recovery): right-aligned and quiet.
         self.clear_read_button = QPushButton("清除已读记录")
+        self.clear_read_button.setFlat(True)
+        self.clear_read_button.setStyleSheet(
+            f"QPushButton {{ color: {theme.TEXT_SECONDARY}; border: none; padding: 4px 6px; }}"
+            f"QPushButton:hover {{ color: {theme.TEXT_PRIMARY}; }}"
+        )
         self.clear_read_button.clicked.connect(self._clear_read)
         read_bar.addWidget(self.clear_read_button)
-        read_bar.addStretch(1)
         inbox_layout.addLayout(read_bar)
         compose_card = QFrame()
         compose_card.setProperty("flatCard", True)
@@ -161,9 +174,10 @@ class MailboxDialog(QDialog):
             "仅版本、Windows 主版本、架构和近期错误码，发送前可预览。"
         )
         send_bar.addWidget(self.attach_diagnostics)
+        send_bar.addStretch(1)
+        # The count belongs to the text and the send button, not the checkbox.
         self.counter = QLabel("0 / 500")
         send_bar.addWidget(self.counter)
-        send_bar.addStretch(1)
         self.send_button = QPushButton("预览并发送")
         self.send_button.setStyleSheet(theme.button_qss("accent"))
         self.send_button.clicked.connect(self.send_message)
@@ -265,6 +279,8 @@ class MailboxDialog(QDialog):
                     and item.published_at <= now < item.expires_at
                 ):
                     key = read_fingerprint("announcements", item.announcement_id, item.published_at)
+                    if ANNOUNCEMENT_ID_RE.fullmatch(item.announcement_id):
+                        self._announcement_ids[key] = item.announcement_id
                     self._add_row(self.announcements, key, item.title, item.body, True)
         if thread is not None:
             self._replace_rows(self.inbox)
@@ -304,9 +320,13 @@ class MailboxDialog(QDialog):
                 title, _body, direction = self._rows[key]
                 unread = direction == "incoming" and key not in self._seen
                 count += int(unread)
-                row.setText(("[未读] " if unread else "") + title)
+                # Unread is shown by weight, not by a text prefix.
+                font = row.font()
+                font.setBold(unread)
+                row.setFont(font)
+                row.setText(title)
             label = "留言与回复" if index == 0 else "公告"
-            self.tabs.setTabText(index, label + f" ({widget.count()})")
+            self.tabs.setTabText(index, label + (f" ({count})" if count else ""))
             total += count
         self.unread_changed.emit(total)
 
@@ -327,7 +347,14 @@ class MailboxDialog(QDialog):
             if key in self._rows:
                 self.detail.setPlainText(self._rows[key][1])
                 if self._rows[key][2] == "incoming":
+                    first_view = key not in self._seen
                     self._mark((key,))
+                    announcement_id = self._announcement_ids.get(key, "")
+                    if first_view and announcement_id and self._on_announcement_viewed:
+                        try:
+                            self._on_announcement_viewed(announcement_id)
+                        except Exception:  # noqa: BLE001 - a receipt never breaks reading
+                            pass
 
     def _mark_all(self) -> None:
         self._mark(tuple(self._rows))
@@ -425,3 +452,133 @@ class MailboxDialog(QDialog):
         self.attach_diagnostics.setChecked(False)
         self.status.setText(f"已发送，今日还可留言 {self._remaining} 次。")
         self.refresh()
+
+
+class MailboxWatcher(QObject):
+    """Background check for unread announcements and author replies (v0.4.1).
+
+    Runs at startup and every ``period_ms``; reads only the local read store
+    and never marks anything read.  ``new_mail`` fires once per item, using a
+    second marker store, so the tray notice is not repeated on every check.
+    Failures are silent: the mailbox itself still works when opened.
+    """
+
+    unread_changed = Signal(int)
+    new_mail = Signal(object)  # tuple[UnreadMail, ...]
+
+    def __init__(
+        self,
+        public_transport: Any | None,
+        read_store: MailboxReadStore,
+        notified_store: MailboxReadStore,
+        *,
+        thread_source: Callable[[], tuple[Any | None, str]] = lambda: (None, ""),
+        clock: Callable[[], float] = time.time,
+        version: Callable[[], str] = installed_version,
+        min_interval_s: int = 600,
+        period_ms: int = 6 * 60 * 60 * 1000,
+    ) -> None:
+        super().__init__()
+        self._public = public_transport
+        self._read_store = read_store
+        self._notified_store = notified_store
+        self._thread_source = thread_source
+        self._clock = clock
+        self._version = version
+        self._min_interval_s = min_interval_s
+        self._last_check: float | None = None
+        self._job: _MailJob | None = None
+        self._job_account_id = ""
+        self.has_thread = False
+        self._timer = QTimer(self)
+        self._timer.setInterval(period_ms)
+        self._timer.timeout.connect(lambda: self.check(force=True))
+
+    def start(self) -> None:
+        self.check(force=True)
+        self._timer.start()
+
+    def stop(self) -> None:
+        self._timer.stop()
+
+    def check(self, *, force: bool = False) -> bool:
+        """Start one background fetch; False when skipped (busy or too soon)."""
+        if self._job is not None:
+            return False
+        now = self._clock()
+        if (
+            not force
+            and self._last_check is not None
+            and now - self._last_check < self._min_interval_s
+        ):
+            return False
+        try:
+            transport, account_id = self._thread_source()
+        except Exception:  # noqa: BLE001
+            transport, account_id = None, ""
+        if not account_id:
+            transport = None
+        public = self._public
+        if public is None and transport is None:
+            return False
+        self._last_check = now
+
+        def load() -> object:
+            result: dict[str, Any] = {"announcements": None, "thread": None}
+            for key, source, method in (
+                ("announcements", public, "announcements"),
+                ("thread", transport, "mailbox_thread"),
+            ):
+                if source is not None:
+                    try:
+                        result[key] = getattr(source, method)()
+                    except Exception:  # noqa: BLE001 - offline is normal
+                        pass
+            return result
+
+        job = _MailJob(self)
+        self._job = job
+        self._job_account_id = account_id
+        # A bound slot (not a lambda): the worker thread's emit is queued to
+        # this object's thread, like MailboxDialog._loaded.
+        job.done.connect(self._loaded)
+        job.start(load)
+        return True
+
+    @Slot(object)
+    def _loaded(self, result: object) -> None:
+        account_id = self._job_account_id
+        if self._job is not None:
+            self._job.deleteLater()
+            self._job = None
+        if not isinstance(result, dict):
+            return
+        if result.get("announcements") is None and result.get("thread") is None:
+            return
+        if result.get("thread") is not None:
+            self.has_thread = True
+        try:
+            seen = self._read_store.seen()
+        except (OSError, ValueError):
+            seen = frozenset()
+        items = unread_mail(
+            result.get("announcements"),
+            result.get("thread"),
+            seen,
+            account_id=account_id,
+            version=self._version(),
+            now=int(self._clock()),
+        )
+        self.unread_changed.emit(len(items))
+        try:
+            notified = self._notified_store.seen()
+        except (OSError, ValueError):
+            notified = frozenset()
+        fresh = tuple(item for item in items if item.key not in notified)
+        if not fresh:
+            return
+        try:
+            self._notified_store.mark_read(item.key for item in fresh)
+        except (OSError, ValueError):
+            pass  # worst case the notice repeats at the next check
+        self.new_mail.emit(fresh)

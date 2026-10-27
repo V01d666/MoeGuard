@@ -35,10 +35,13 @@ class TrayIcon(QObject):
     toggle_disturb_free = Signal(bool)  # 完全免打扰开关（隐藏桌宠）
     open_settings = Signal()
     open_custom_role_workbench = Signal()
+    open_mailbox = Signal()
     open_security_setup = Signal()
     open_evidence = Signal()
     quit_requested = Signal()
     tray_activated = Signal(int)  # QSystemTrayIcon.ActivationReason
+    # 托盘气泡被点击；参数是该气泡 show_message 时的 tag（空 = 普通提示）
+    message_clicked = Signal(str)
 
     def __init__(
         self,
@@ -53,6 +56,8 @@ class TrayIcon(QObject):
         self._patrol_icon = patrol_icon or icon
         self._tray = QSystemTrayIcon(icon, parent)
         self._tray.setToolTip("萌卫 MoeGuard")
+        self._message_tag = ""
+        self._tray.messageClicked.connect(self._on_message_clicked)
 
         # 绑定 activated 信号 -> 转发 tray_activated + 左键双击处理
         self._tray.activated.connect(self._on_activated)
@@ -69,6 +74,8 @@ class TrayIcon(QObject):
         self._act_settings = QAction("设置…", menu)
         self._act_custom_role = QAction("桌宠工坊…", menu)
         self._act_custom_role.setVisible(False)
+        self._act_mailbox = QAction("信箱…", menu)
+        self._act_mailbox.setVisible(False)
         self._act_security_setup = QAction("值守设置（风险告知与主人注册）…", menu)
         self._act_evidence = QAction("查看本地证据…", menu)
         self._act_quit = QAction("退出萌卫", menu)
@@ -88,16 +95,20 @@ class TrayIcon(QObject):
         self._act_disturb_free.toggled.connect(self.toggle_disturb_free.emit)
         self._act_settings.triggered.connect(self.open_settings)
         self._act_custom_role.triggered.connect(self.open_custom_role_workbench)
+        self._act_mailbox.triggered.connect(self.open_mailbox)
         self._act_security_setup.triggered.connect(self.open_security_setup)
         self._act_evidence.triggered.connect(self.open_evidence)
         self._act_quit.triggered.connect(self.quit_requested)
 
+        # v0.4.1：桌宠工坊放最前（不可用时隐藏，Qt 会折叠多余的分隔线）。
+        menu.addAction(self._act_custom_role)
+        menu.addAction(self._act_mailbox)
+        menu.addSeparator()
         menu.addAction(self._act_patrol)
         menu.addAction(self._act_companion)
         menu.addSeparator()
         menu.addAction(self._act_disturb_free)
         menu.addSeparator()
-        menu.addAction(self._act_custom_role)
         menu.addAction(self._act_settings)
         menu.addAction(self._act_security_setup)
         menu.addAction(self._act_evidence)
@@ -149,8 +160,21 @@ class TrayIcon(QObject):
         """仅在 v0.2 客户端注入工作台后显示直达入口。"""
         self._act_custom_role.setVisible(bool(available))
 
+    def set_mailbox_available(self, available: bool) -> None:
+        """配置了信箱服务时显示「信箱…」。"""
+        self._act_mailbox.setVisible(bool(available))
+
+    def set_mailbox_unread(self, count: int) -> None:
+        """菜单上显示未读数（0 时不显示数字）。"""
+        count = max(0, int(count))
+        self._act_mailbox.setText(f"信箱（{count}）…" if count else "信箱…")
+
     def show_message(
-        self, title: str, message: str, msecs: int = 3000
+        self, title: str, message: str, msecs: int = 3000, *, tag: str = ""
     ) -> None:
-        """显示托盘气泡通知。"""
+        """显示托盘气泡通知；tag 用来区分点击的是哪条气泡。"""
+        self._message_tag = tag
         self._tray.showMessage(title, message, QSystemTrayIcon.Information, msecs)
+
+    def _on_message_clicked(self) -> None:
+        self.message_clicked.emit(self._message_tag)

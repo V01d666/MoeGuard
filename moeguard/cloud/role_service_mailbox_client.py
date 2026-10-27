@@ -3,7 +3,12 @@
 Message bodies and diagnostics are never cached here. Read markers contain
 only SHA-256 fingerprints and timestamps, expire after 30 days, and are capped
 at 200 entries / 32 KiB. Opening the store prunes expired entries; clear() lets
-the user remove the remaining metadata. No background polling is required.
+the user remove the remaining metadata.
+
+v0.4.1: ``unread_mail`` computes what is unread for the background watcher
+(startup + every few hours, no content stored); the watcher keeps a second
+store of the same format for "already announced in the tray", so a notice is
+shown once per item (again after the 30-day marker expiry if still unread).
 """
 
 from __future__ import annotations
@@ -15,8 +20,10 @@ import re
 import time
 import uuid
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+from typing import Any
 
 from moeguard.cloud.role_service_mailbox_contract import MailboxDiagnostics
 from moeguard.utils.version import installed_version
@@ -25,6 +32,49 @@ READ_MARKER_RETENTION_SECONDS = 30 * 24 * 60 * 60
 MAX_READ_MARKERS = 200
 MAX_READ_MARKER_BYTES = 32 * 1024
 _DIGEST_RE = re.compile(r"^[a-f0-9]{64}$")
+# Same shape the event contract accepts for receipts (server-generated IDs).
+ANNOUNCEMENT_ID_RE = re.compile(r"ma_[0-9a-f]{24}")
+
+
+@dataclass(frozen=True)
+class UnreadMail:
+    """One unread item: an announcement or an author reply (title kept in memory only)."""
+
+    kind: str  # "announcement" | "reply"
+    key: str  # read fingerprint, as the mailbox dialog computes it
+    title: str
+    announcement_id: str = ""  # set only for receipt-safe announcement IDs
+
+
+def unread_mail(
+    announcements: Iterable[Any] | None,
+    thread: Any | None,
+    seen: frozenset[str],
+    *,
+    account_id: str,
+    version: str,
+    now: int,
+) -> tuple[UnreadMail, ...]:
+    """Unread items exactly as the mailbox dialog counts them."""
+    items: list[UnreadMail] = []
+    for item in announcements or ():
+        if not (item.applies_to(version) and item.published_at <= now < item.expires_at):
+            continue
+        key = read_fingerprint("announcements", item.announcement_id, item.published_at)
+        if key in seen:
+            continue
+        receipt_id = item.announcement_id
+        if not ANNOUNCEMENT_ID_RE.fullmatch(receipt_id):
+            receipt_id = ""
+        items.append(UnreadMail("announcement", key, item.title, receipt_id))
+    if thread is not None and account_id:
+        for entry in thread.messages:
+            if entry.direction != "operator":
+                continue
+            key = read_fingerprint(account_id, entry.message_id, entry.created_at)
+            if key not in seen:
+                items.append(UnreadMail("reply", key, "作者回复"))
+    return tuple(items)
 
 
 def mailbox_diagnostics(recent_error_codes: tuple[str, ...] = ()) -> MailboxDiagnostics:

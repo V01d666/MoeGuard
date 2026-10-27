@@ -20,7 +20,11 @@ _SCREENS = frozenset({"settings", "pet_workshop", "role_preview", "runtime"})
 _STAGES = frozenset(
     {"role_library", "create_identity", "select_animate", "preview_install", "recovery"}
 )
-_ENTRYPOINTS = frozenset({"settings", "tray", "startup", "workbench", "recovery"})
+_ENTRYPOINTS = frozenset(
+    # v0.4.1+: pet_menu = the pet's right-click menu; notification = a tray
+    # balloon the user clicked.
+    {"settings", "tray", "startup", "workbench", "recovery", "pet_menu", "notification"}
+)
 _OPERATIONS = frozenset(
     {"identity_candidates", "initial_package", "action_revision", "appearance_revision"}
 )
@@ -61,6 +65,12 @@ _INSTALL_KINDS = frozenset({"installed", "portable", "source", "unknown"})
 _ROLE_KINDS = frozenset({"builtin", "custom", "none"})
 # v0.4.0+: which request family a latency sample belongs to.
 _LATENCY_ROUTES = frozenset({"account", "tasks", "assets", "results", "events", "updates"})
+# v0.4.1+: what the user chose in the first-run bubble and in the guard setup.
+_ONBOARDING_OUTCOMES = frozenset({"acknowledged", "closed"})
+_PATROL_SETUP_OUTCOMES = frozenset({"declined", "owner_skipped", "owner_registered", "closed"})
+# Server-generated announcement IDs (RoleServiceState.publish_announcement):
+# opaque, never user text, so a receipt can name the announcement it is for.
+_ANNOUNCEMENT_ID_RE = re.compile(r"ma_[0-9a-f]{24}")
 
 _PROPERTY_LIMITS = {
     "candidate_count": (1, 4),
@@ -78,6 +88,8 @@ _PROPERTY_LIMITS = {
     "failure_count": (0, 10_000),
     "latency_p50_ms": (0, 600_000),
     "latency_p90_ms": (0, 600_000),
+    # v0.4.1+ unread items when the mailbox was opened.
+    "unread_count": (0, 1000),
 }
 
 _COMMON_CONTEXT = frozenset({"screen", "stage", "entrypoint", "operation"})
@@ -175,6 +187,18 @@ _EVENT_RULES = {
         "latency_p90_ms",
         required=("latency_route", "sample_count", "latency_p50_ms"),
     ),
+    # -- v0.4.1+ (server accepts first) ---------------------------------------
+    # The first-run bubble was acknowledged or closed.
+    "onboarding_finished": _rule("onboarding_outcome", required=("onboarding_outcome",)),
+    # How the guard setup (risk notice + owner registration) ended.
+    "patrol_setup_finished": _rule(
+        "patrol_setup_outcome", required=("patrol_setup_outcome",)
+    ),
+    "mailbox_opened": _rule("unread_count"),
+    # Delivery receipt: the client fetched a new announcement and showed the
+    # notice.  Read receipt: the user opened it in the mailbox.
+    "announcement_received": _rule("announcement_id", required=("announcement_id",)),
+    "announcement_viewed": _rule("announcement_id", required=("announcement_id",)),
 }
 
 
@@ -225,6 +249,14 @@ def _property_value(name: str, value: Any) -> object:
         return _enum(value, name, _ROLE_KINDS)
     if name == "latency_route":
         return _enum(value, name, _LATENCY_ROUTES)
+    if name == "onboarding_outcome":
+        return _enum(value, name, _ONBOARDING_OUTCOMES)
+    if name == "patrol_setup_outcome":
+        return _enum(value, name, _PATROL_SETUP_OUTCOMES)
+    if name == "announcement_id":
+        if not isinstance(value, str) or not _ANNOUNCEMENT_ID_RE.fullmatch(value):
+            raise ValueError("announcement_id is invalid")
+        return value
     if name == "windows_major":
         return _enum(value, name, frozenset({"10", "11", "unknown"}))
     if name == "architecture":
