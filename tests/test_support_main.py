@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QCoreApplication, QEvent, QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QLabel, QMessageBox, QPushButton
 
 from moeguard import updater as updater_module
@@ -18,6 +20,7 @@ from moeguard.cloud.role_service_http_client import (
     RoleServiceConnectionError,
     RoleServiceEnrollment,
 )
+from moeguard.cloud.role_service_mailbox_contract import MailboxThread
 from moeguard.cloud.role_service_session import RoleServiceSession, RoleServiceSessionStore
 from moeguard.cloud.role_workbench import (
     FakeRoleWorkbenchBackend,
@@ -369,9 +372,62 @@ def _session_store(path: Path, *, expires_at: int = 2_000_000_000):
 
 
 @pytest.fixture
-def qt_app(monkeypatch) -> QApplication:
+def qt_app(monkeypatch) -> Iterator[QApplication]:
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
-    return QApplication.instance() or QApplication([])
+    qt = QApplication.instance() or QApplication([])
+    apps = []
+    threads = []
+    original_init = MoeGuardApp.__init__
+    original_start = threading.Thread.start
+
+    def initialize(app, *args, **kwargs):
+        original_init(app, *args, **kwargs)
+        apps.append(app)  # Keep QObject owners alive until their workers finish.
+
+    def start(thread):
+        result = original_start(thread)
+        if thread.name.startswith("moeguard-"):
+            threads.append(thread)
+        return result
+
+    monkeypatch.setattr(MoeGuardApp, "__init__", initialize)
+    monkeypatch.setattr(threading.Thread, "start", start)
+    # These tests exercise connection and UI wiring, not live HTTP endpoints.
+    # Individual connection scenarios override enrollment below as needed.
+    monkeypatch.setattr(HttpRoleServiceTransport, "enroll", lambda *_args: _automatic_enrollment())
+    monkeypatch.setattr(HttpRoleServiceTransport, "announcements", lambda _self: ())
+    monkeypatch.setattr(
+        HttpRoleServiceTransport, "mailbox_thread", lambda _self: MailboxThread((), 500, 5, 5),
+    )
+    yield qt
+
+    for app in apps:
+        watcher = getattr(app, "_mailbox_watcher", None)
+        if watcher is not None:
+            watcher.stop()
+        for timer in app.findChildren(QTimer):
+            timer.stop()
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        qt.processEvents()
+        for thread in threads:
+            thread.join(.005)
+        busy = any(
+            getattr(getattr(app, "_service_connection", None), "busy", False)
+            or getattr(getattr(app, "_mailbox_watcher", None), "_job", None) is not None
+            for app in apps
+        )
+        if not busy and not any(thread.is_alive() for thread in threads):
+            break
+    else:
+        pytest.fail("connection test left an active service or mailbox worker")
+    for widget in qt.topLevelWidgets():
+        widget.hide()
+        widget.deleteLater()
+    for app in apps:
+        app.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    qt.processEvents()
 
 
 def _factory(app: MoeGuardApp):
@@ -893,3 +949,24 @@ def test_pilot_build_wires_one_shared_tracker_and_request_timing(
     assert outbox.exists()  # Undelivered events wait in the shared outbox.
     assert (tmp_path / "workbench" / "state" / "daily-active.json").exists()
     telemetry.shutdown()
+
+
+def test_automatic_connection_fixture_never_starts_real_mail_http(
+    tmp_path, qt_app, monkeypatch,
+):
+    calls = []
+
+    def unexpected_http(*args, **kwargs):
+        calls.append((threading.current_thread().name, args[1:3]))
+        raise AssertionError("connection tests must use offline HTTP replies")
+
+    monkeypatch.setattr(HttpRoleServiceTransport, "_request", unexpected_http)
+    app, _, _ = _automatic_app(tmp_path, monkeypatch, lambda *_: _automatic_enrollment())
+    app.ready.emit()
+    _wait_connection(app, qt_app)
+    deadline = time.monotonic() + 5
+    while app._mailbox_watcher._job is not None and time.monotonic() < deadline:
+        qt_app.processEvents()
+        time.sleep(.005)
+    assert app._mailbox_watcher._job is None
+    assert not calls
