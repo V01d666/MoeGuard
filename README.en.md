@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://moeproject.net">
+  <a href="https://moeproject.net/en/">
     <img src="https://img.shields.io/badge/Website-moeproject.net-1E8BFF?style=for-the-badge" alt="Website · moeproject.net">
   </a>
   <a href="https://ifdian.net/a/moeguard">
@@ -28,7 +28,7 @@
 - Dreamed of making your own, only to be scared off by modeling and animation?
 - Think desktop pets are all cuteness and no use?
 
-Then come play with it on the [MoeGuard website](https://moeproject.net) first, and [take it home](#jump-right-in) if you like it!
+Then come play with it on the [MoeGuard website](https://moeproject.net/en/) first, and [take it home](#jump-right-in) if you like it!
 
 Write a short description or drop in a picture, and you get a pet that's truly yours, animations included. Bored of the look? Give it a makeover whenever you like
 
@@ -92,7 +92,7 @@ MoeGuard itself is free, and the starter characters and watch duty work right aw
 <summary><strong>v0.4 · Connections and everyday improvements</strong></summary>
 
 - [v0.4.2](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.2): fixes duplicate anonymous accounts when the app is opened several times on first launch; only one instance runs per user data folder, and connection retries and renewals reuse the same identity
-- [2026/10/26] 🌐 [v0.4.1](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.1): the [MoeGuard website](https://moeproject.net) launches with pet interactions in your browser, while the app gains mailbox alerts, character renaming, and tidier Settings
+- [2026/10/26] 🌐 [v0.4.1](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.1): the [MoeGuard website](https://moeproject.net/en/) launches with pet interactions in your browser, while the app gains mailbox alerts, character renaming, and tidier Settings
 - [2026/10/18] 🎉 [v0.4.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.0): service connections and generation credits refresh automatically, credit warnings are clearer, and upgrades keep your support ID
 
 </details>
@@ -132,7 +132,7 @@ Pet Workshop lets anyone create a character they love, but that's only the first
 - 🎁 **One-click sharing**: pack a character into a single file and send it to a friend to import
 - 📡 **Remote alerts**: the moment something stirs during watch duty, a push to your phone, so you can relax while you're out
 
-That's the plan, but a feature only moves into “MoeGuard today” once it's built, tested, and ready to download. Progress is shared on GitHub, the [website](https://moeproject.net), and [Afdian](https://ifdian.net/a/moeguard)
+That's the plan, but a feature only moves into “MoeGuard today” once it's built, tested, and ready to download. Progress is shared on GitHub, the [website](https://moeproject.net/en/), and [Afdian](https://ifdian.net/a/moeguard)
 
 <details>
 <summary>🔒 Camera and data</summary>
