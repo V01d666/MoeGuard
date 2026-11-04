@@ -3,12 +3,8 @@
 </p>
 
 <p align="center">
-  <a href="https://moeproject.net">
-    <img src="https://img.shields.io/badge/%E5%AE%98%E7%BD%91-moeproject.net-1E8BFF?style=for-the-badge" alt="官网 · moeproject.net">
-  </a>
-  <a href="https://ifdian.net/a/moeguard">
-    <img src="https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-%E6%94%AF%E6%8C%81%E8%90%8C%E5%8D%AB-946CE6?style=for-the-badge" alt="爱发电 · 支持萌卫">
-  </a>
+  <a href="https://moeproject.net"><img src="https://img.shields.io/badge/%E5%AE%98%E7%BD%91-moeproject.net-1E8BFF?style=for-the-badge" alt="官网 · moeproject.net"></a>
+  <a href="https://ifdian.net/a/moeguard"><img src="https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-%E6%94%AF%E6%8C%81%E8%90%8C%E5%8D%AB-946CE6?style=for-the-badge" alt="爱发电 · 支持萌卫"></a>
 </p>
 
 # 萌卫 MoeGuard
@@ -88,35 +84,45 @@ py -3.12 -m venv .venv
 
 ## 项目时间线
 
-<details>
-<summary><strong>v0.4 · 连接与日常体验</strong></summary>
+完整更新记录见 [Releases](https://github.com/V01d666/MoeGuard/releases)
 
-- [v0.4.2](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.2)：修复首次启动快速多开可能重复创建匿名账户的问题；同一用户资料目录只保留一个应用实例，连接重试与续签继续复用原身份
-- [2026/10/26] 🌐 [v0.4.1](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.1)：[萌卫官网](https://moeproject.net)上线，可以在网页里戳一戳、拎起来、看桌宠探头；客户端带来信箱提醒、角色改名和更顺手的设置
-- [2026/10/18] 🎉 [v0.4.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.0)：服务连接与生成次数自动刷新，次数不足提示更清楚，升级后保留原支持编号
+<details open>
+<summary><strong>V0.4</strong></summary>
 
-</details>
-
-<details>
-<summary><strong>v0.3 · 安装版更新与信箱</strong></summary>
-
-- [2026/10/08] 🎉 [v0.3.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.3.0)：安装版支持原地更新，新增内置信箱与支持编号，设置页也能查看当前版本
+| 日期 | 版本 | 更新内容 |
+| :--: | :-- | :-- |
+| `11-04` | 🚀 [**v0.4.2**](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.2) | 🔧 修复首次启动快速多开时可能重复创建匿名账户<br>🔧 同一资料目录只保留一个实例；重试与续签沿用原身份 |
+| `10-26` | 🚀 [**v0.4.1**](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.1) | ✨ [萌卫官网](https://moeproject.net)上线：戳一戳、拎起来、看桌宠探头<br>✨ 信箱提醒、角色改名、更顺手的设置 |
+| `10-18` | 🚀 [**v0.4.0**](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.0) | ✨ 服务连接与生成次数自动刷新，次数不足提示更清楚<br>✨ 升级后保留原支持编号 |
 
 </details>
 
 <details>
-<summary><strong>v0.2 · 桌宠工坊</strong></summary>
+<summary><strong>V0.3</strong></summary>
 
-- [2026/09/24] 🎉 [v0.2.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0)：桌宠工坊正式登场，带来生成进度与预计等待、完成提醒，以及角色导出和导入
-- [2026/09/01] 🧪 [v0.2.0 Preview](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0-preview)：开启限量内测，详见[爱发电内测公告](https://ifdian.net/p/d2c072d4a61d11f1bd1c5254001e7c00)
-- [2026/08/23] 🎬 首支实机 Demo：[文字生成桌宠](.github/assets/text2pet-demo.mp4)与[图片生成桌宠](.github/assets/image2pet-demo.mp4)
+| 日期 | 版本 | 更新内容 |
+| :--: | :-- | :-- |
+| `10-08` | 🚀 [**v0.3.0**](https://github.com/V01d666/MoeGuard/releases/tag/v0.3.0) | ✨ 安装版支持原地更新<br>✨ 内置信箱与支持编号，设置页可查看版本 |
 
 </details>
 
 <details>
-<summary><strong>v0.1 · 三位初始桌宠与看家</strong></summary>
+<summary><strong>V0.2</strong></summary>
 
-- [2026/08/18] 🚀 [v0.1.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.1.0)：三位初始角色、桌面互动和锁屏看家一起登场
+| 日期 | 版本 | 更新内容 |
+| :--: | :-- | :-- |
+| `09-24` | 🚀 [**v0.2.0**](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0) | ✨ 桌宠工坊：生成进度、预计等待、完成提醒<br>✨ 角色导出与导入 |
+| `09-01` | 🧪 [v0.2.0 Preview](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0-preview) | 开启限量内测，详见[爱发电内测公告](https://ifdian.net/p/d2c072d4a61d11f1bd1c5254001e7c00) |
+| `08-23` | 🎬 Demo | 首支实机演示：[文字生成桌宠](.github/assets/text2pet-demo.mp4)<br>[图片生成桌宠](.github/assets/image2pet-demo.mp4) |
+
+</details>
+
+<details>
+<summary><strong>V0.1</strong></summary>
+
+| 日期 | 版本 | 更新内容 |
+| :--: | :-- | :-- |
+| `08-18` | 🚀 [**v0.1.0**](https://github.com/V01d666/MoeGuard/releases/tag/v0.1.0) | ✨ 三位初始角色与桌面互动<br>✨ 锁屏看家 |
 
 </details>
 

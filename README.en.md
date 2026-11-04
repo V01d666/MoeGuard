@@ -3,12 +3,8 @@
 </p>
 
 <p align="center">
-  <a href="https://moeproject.net/en/">
-    <img src="https://img.shields.io/badge/Website-moeproject.net-1E8BFF?style=for-the-badge" alt="Website · moeproject.net">
-  </a>
-  <a href="https://ifdian.net/a/moeguard">
-    <img src="https://img.shields.io/badge/Afdian-Support%20MoeGuard-946CE6?style=for-the-badge" alt="Support MoeGuard on Afdian">
-  </a>
+  <a href="https://moeproject.net/en/"><img src="https://img.shields.io/badge/Website-moeproject.net-1E8BFF?style=for-the-badge" alt="Website · moeproject.net"></a>
+  <a href="https://ifdian.net/a/moeguard"><img src="https://img.shields.io/badge/Afdian-Support%20MoeGuard-946CE6?style=for-the-badge" alt="Support MoeGuard on Afdian"></a>
 </p>
 
 # MoeGuard
@@ -88,35 +84,45 @@ MoeGuard itself is free, and the starter characters and watch duty work right aw
 
 ## Timeline
 
-<details>
-<summary><strong>v0.4 · Connections and everyday improvements</strong></summary>
+See [Releases](https://github.com/V01d666/MoeGuard/releases) for the full release history
 
-- [v0.4.2](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.2): fixes duplicate anonymous accounts when the app is opened several times on first launch; only one instance runs per user data folder, and connection retries and renewals reuse the same identity
-- [2026/10/26] 🌐 [v0.4.1](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.1): the [MoeGuard website](https://moeproject.net/en/) launches with pet interactions in your browser, while the app gains mailbox alerts, character renaming, and tidier Settings
-- [2026/10/18] 🎉 [v0.4.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.0): service connections and generation credits refresh automatically, credit warnings are clearer, and upgrades keep your support ID
+<details open>
+<summary><strong>V0.4</strong></summary>
 
-</details>
-
-<details>
-<summary><strong>v0.3 · Installer updates and mailbox</strong></summary>
-
-- [2026/10/08] 🎉 [v0.3.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.3.0): the installed edition supports updates in place, with a built-in mailbox, support ID, and version display in Settings
+| Date | Version | Highlights |
+| :--: | :-- | :-- |
+| `11-04` | 🚀 [**v0.4.2**](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.2) | 🔧 Fix duplicate anonymous accounts from rapid first launches<br>🔧 One instance per data folder; retries and renewals keep the same identity |
+| `10-26` | 🚀 [**v0.4.1**](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.1) | ✨ The [MoeGuard website](https://moeproject.net/en/) launches: poke, pick up, and watch pets peek out<br>✨ Mailbox alerts, character renaming, and tidier Settings |
+| `10-18` | 🚀 [**v0.4.0**](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.0) | ✨ Automatic connection and credit refresh; clearer credit warnings<br>✨ Upgrades keep your support ID |
 
 </details>
 
 <details>
-<summary><strong>v0.2 · Pet Workshop</strong></summary>
+<summary><strong>V0.3</strong></summary>
 
-- [2026/09/24] 🎉 [v0.2.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0): Pet Workshop arrives with generation progress and time estimates, completion notifications, and character export and import
-- [2026/09/01] 🧪 [v0.2.0 Preview](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0-preview): a limited trial opens; see the [Afdian announcement](https://ifdian.net/p/d2c072d4a61d11f1bd1c5254001e7c00)
-- [2026/08/23] 🎬 First hands-on demos: [text to pet](.github/assets/text2pet-demo.mp4) and [image to pet](.github/assets/image2pet-demo.mp4)
+| Date | Version | Highlights |
+| :--: | :-- | :-- |
+| `10-08` | 🚀 [**v0.3.0**](https://github.com/V01d666/MoeGuard/releases/tag/v0.3.0) | ✨ Update the installed app in place<br>✨ Built-in mailbox and support ID; view the version in Settings |
 
 </details>
 
 <details>
-<summary><strong>v0.1 · Three starter pets and watch duty</strong></summary>
+<summary><strong>V0.2</strong></summary>
 
-- [2026/08/18] 🚀 [v0.1.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.1.0): three starter characters, desktop interactions, and lock-screen watch duty debut
+| Date | Version | Highlights |
+| :--: | :-- | :-- |
+| `09-24` | 🚀 [**v0.2.0**](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0) | ✨ Pet Workshop: progress, time estimates, and completion alerts<br>✨ Character export and import |
+| `09-01` | 🧪 [v0.2.0 Preview](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0-preview) | A limited trial opens; see the [Afdian announcement](https://ifdian.net/p/d2c072d4a61d11f1bd1c5254001e7c00) |
+| `08-23` | 🎬 Demo | First hands-on demos: [text to pet](.github/assets/text2pet-demo.mp4)<br>[image to pet](.github/assets/image2pet-demo.mp4) |
+
+</details>
+
+<details>
+<summary><strong>V0.1</strong></summary>
+
+| Date | Version | Highlights |
+| :--: | :-- | :-- |
+| `08-18` | 🚀 [**v0.1.0**](https://github.com/V01d666/MoeGuard/releases/tag/v0.1.0) | ✨ Three starter characters and desktop interactions<br>✨ Lock-screen watch duty |
 
 </details>
 
