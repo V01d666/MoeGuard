@@ -27,6 +27,7 @@ from moeguard.cloud.role_service_session import (
     RoleServiceSessionStore,
     WindowsDpapiProtector,
 )
+from moeguard.utils.file_lock import FileLock
 
 _MAX_BINDING_BYTES = 64 * 1024
 _ENROLLMENT_PREFIX = "eni_"
@@ -189,6 +190,9 @@ class RoleServiceBindingManager:
         self._enroll = enroll or HttpRoleServiceTransport.enroll
         self._clock = clock
         self._binding_lock = threading.RLock()
+        self._process_lock_path = enrollment_store.path.with_name(
+            enrollment_store.path.name + ".lock"
+        )
         # Written by v0.3.0's "disconnect" button, which v0.4.0 removed.  A
         # stale marker must not keep a user offline, so it is only cleared.
         self._legacy_disconnect_marker = session_store.path.with_name(
@@ -206,11 +210,15 @@ class RoleServiceBindingManager:
 
         A stored, unexpired session costs no network request.
         """
-        with self._binding_lock:
-            session = self._bind(service_origin)
-            if not self._legacy_disconnect_marker.is_symlink():
-                self._legacy_disconnect_marker.unlink(missing_ok=True)
-            return session
+        with self._binding_lock, FileLock(self._process_lock_path):
+            return self._bind_and_clear_marker(service_origin)
+
+    def _bind_and_clear_marker(self, service_origin: str) -> RoleServiceSession:
+        # Caller owns both locks. Do not re-enter the OS lock from renew().
+        session = self._bind(service_origin)
+        if not self._legacy_disconnect_marker.is_symlink():
+            self._legacy_disconnect_marker.unlink(missing_ok=True)
+        return session
 
     def renew(self, service_origin: str, rejected_token: str) -> RoleServiceSession:
         """Replace a token the service rejected, keeping the same identity.
@@ -218,7 +226,7 @@ class RoleServiceBindingManager:
         Concurrent callers that hit the same rejection renew once: whoever
         holds the lock second finds a different token already stored.
         """
-        with self._binding_lock:
+        with self._binding_lock, FileLock(self._process_lock_path):
             try:
                 stored = self.current_session()
             except (OSError, ValueError):
@@ -228,7 +236,7 @@ class RoleServiceBindingManager:
             # Secure the identity before dropping the session that carries it.
             self._recovery_identity(https_role_service_origin(service_origin))
             self.session_store.delete()
-            return self.bind(service_origin)
+            return self._bind_and_clear_marker(service_origin)
 
     def _recovery_identity(self, origin: str) -> RoleServiceEnrollmentIdentity | None:
         identity = self.enrollment_store.load()

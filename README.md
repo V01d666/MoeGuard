@@ -59,11 +59,11 @@
 只养桌宠用不到摄像头；第一次开启看家时，萌卫会先讲清楚风险、征得你的同意
 
 <details>
-<summary>🔎 文件校验（v0.4.1）</summary>
+<summary>🔎 文件校验（v0.4.2）</summary>
 
 | 文件 | 字节数 | SHA-256 |
 | --- | ---: | --- |
-| `MoeGuard-Setup.exe` | 210486726 | `dd5b0d75b6754187d12097e3d81b2c6d99acb4609511f7e717effadbadb3106f` |
+| `MoeGuard-Setup.exe` | 206874814 | `b37c11a1672f54f792b8954e5468b56cce88322f311f5df63eea823f02d0b866` |
 
 </details>
 
@@ -88,13 +88,37 @@ py -3.12 -m venv .venv
 
 ## 项目时间线
 
-- [2026/10/26] 🌐 [萌卫官网](https://moeproject.net)正式上线！不用安装，网页里就能先和桌宠戳一戳、拎起来、看它探头，还有像聊天一样的上手教程；[v0.4.1](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.1) 也同步发布，信箱提醒、角色改名等小改进一起送到
-- [2026/10/18] 🎉 [MoeGuard v0.4.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.0) 正式发布！服务连接与生成次数自动刷新，次数不足提示更清楚，升级后保留原支持编号
-- [2026/10/08] 🎉 [MoeGuard v0.3.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.3.0) 正式发布！安装版支持原地更新，新增内置信箱与支持编号，设置页也能查看当前版本
-- [2026/09/24] 🎉 [MoeGuard v0.2.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0) 正式发布！桌宠工坊总算是能上桌了，还带来了生成进度与预计等待、完成提醒，以及角色导出和导入
-- [2026/09/01] 🧪 [v0.2.0 Preview](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0-preview) 开启限量内测，桌宠工坊第一次交到大家手上，详见[爱发电内测公告](https://ifdian.net/p/d2c072d4a61d11f1bd1c5254001e7c00)
-- [2026/08/23] 🎬 桌宠工坊首支实机 Demo 出炉，来看看[文字生成桌宠](.github/assets/text2pet-demo.mp4)和[图片生成桌宠](.github/assets/image2pet-demo.mp4)的完整流程
-- [2026/08/18] 🚀 [MoeGuard v0.1.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.1.0) 正式发布，三位初始角色、桌面互动和锁屏看家一起登场
+<details>
+<summary><strong>v0.4 · 连接与日常体验</strong></summary>
+
+- [v0.4.2](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.2)：修复首次启动快速多开可能重复创建匿名账户的问题；同一用户资料目录只保留一个应用实例，连接重试与续签继续复用原身份
+- [2026/10/26] 🌐 [v0.4.1](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.1)：[萌卫官网](https://moeproject.net)上线，可以在网页里戳一戳、拎起来、看桌宠探头；客户端带来信箱提醒、角色改名和更顺手的设置
+- [2026/10/18] 🎉 [v0.4.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.0)：服务连接与生成次数自动刷新，次数不足提示更清楚，升级后保留原支持编号
+
+</details>
+
+<details>
+<summary><strong>v0.3 · 安装版更新与信箱</strong></summary>
+
+- [2026/10/08] 🎉 [v0.3.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.3.0)：安装版支持原地更新，新增内置信箱与支持编号，设置页也能查看当前版本
+
+</details>
+
+<details>
+<summary><strong>v0.2 · 桌宠工坊</strong></summary>
+
+- [2026/09/24] 🎉 [v0.2.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0)：桌宠工坊正式登场，带来生成进度与预计等待、完成提醒，以及角色导出和导入
+- [2026/09/01] 🧪 [v0.2.0 Preview](https://github.com/V01d666/MoeGuard/releases/tag/v0.2.0-preview)：开启限量内测，详见[爱发电内测公告](https://ifdian.net/p/d2c072d4a61d11f1bd1c5254001e7c00)
+- [2026/08/23] 🎬 首支实机 Demo：[文字生成桌宠](.github/assets/text2pet-demo.mp4)与[图片生成桌宠](.github/assets/image2pet-demo.mp4)
+
+</details>
+
+<details>
+<summary><strong>v0.1 · 三位初始桌宠与看家</strong></summary>
+
+- [2026/08/18] 🚀 [v0.1.0](https://github.com/V01d666/MoeGuard/releases/tag/v0.1.0)：三位初始角色、桌面互动和锁屏看家一起登场
+
+</details>
 
 ## 以后呢？
 

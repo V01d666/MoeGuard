@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import errno
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -11,6 +15,7 @@ from moeguard.cloud.role_service_binding import (
 )
 from moeguard.cloud.role_service_http_client import RoleServiceEnrollment
 from moeguard.cloud.role_service_session import RoleServiceSessionStore
+from moeguard.utils.file_lock import FileLock
 
 
 class _TestProtector:
@@ -178,3 +183,67 @@ def test_explicit_rebind_discards_only_a_corrupt_short_lived_session(
     assert session.enrollment_id == identity.enrollment_id
     assert enrollment_store.load() == identity
     assert session_store.load() == session
+
+
+@pytest.mark.parametrize("mode", [
+    "sequential", "shared-manager-threads", "separate-manager-threads",
+])
+def test_local_callers_share_one_binding(tmp_path: Path, mode: str) -> None:
+    calls = []
+
+    def enroll(origin, identity, secret):
+        calls.append((origin, identity, secret))
+        time.sleep(.05)
+        return _enrollment()
+
+    managers = [_manager(tmp_path, enroll)[0] for _ in range(3)]
+    if mode == "sequential":
+        sessions = [manager.bind("https://roles.example") for manager in managers]
+    else:
+        barrier = threading.Barrier(3)
+
+        def bind(index):
+            barrier.wait(5)
+            manager = managers[0] if mode == "shared-manager-threads" else managers[index]
+            return manager.bind("https://roles.example")
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            sessions = list(executor.map(bind, range(3)))
+    assert len(calls) == 1
+    assert sessions[0] == sessions[1] == sessions[2]
+
+
+@pytest.mark.parametrize("renew", [False, True])
+def test_lock_failure_never_enrolls_or_deletes_existing_state(tmp_path, monkeypatch, caplog, renew):
+    calls = []
+    manager, enrollment_store, session_store = _manager(
+        tmp_path, lambda *args: calls.append(args) or _enrollment(),
+    )
+    original = manager.bind("https://roles.example")
+    before = (enrollment_store.path.read_bytes(), session_store.path.read_bytes())
+
+    def fail(_fd):
+        raise OSError(errno.EIO, "private identity or request detail")
+
+    monkeypatch.setattr(FileLock, "_try_lock", staticmethod(fail))
+    with pytest.raises(OSError):
+        if renew:
+            manager.renew("https://roles.example", original.bearer_token)
+        else:
+            manager.bind("https://roles.example")
+    assert len(calls) == 1
+    assert (enrollment_store.path.read_bytes(), session_store.path.read_bytes()) == before
+    assert "operation=acquire errno=5" in caplog.text
+    assert "private identity" not in caplog.text
+
+
+def test_cold_lock_path_failure_never_creates_identity_or_enrolls(tmp_path, caplog):
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_bytes(b"old user data")
+    calls = []
+    manager, _, _ = _manager(blocker, lambda *args: calls.append(args) or _enrollment())
+    with pytest.raises(OSError):
+        manager.bind("https://roles.example")
+    assert calls == []
+    assert blocker.read_bytes() == b"old user data"
+    assert "operation=open" in caplog.text

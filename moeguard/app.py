@@ -64,12 +64,14 @@ from moeguard.ui.pet_window import PetWindow
 from moeguard.ui.settings_dialog import SettingsDialog
 from moeguard.ui.tray import TrayIcon
 from moeguard.utils.crypto import CryptoBox
+from moeguard.utils.file_lock import FileLock
 from moeguard.utils.logging import setup_logging
 from moeguard.utils.paths import (
     CRYPTO_KEY_PATH,
     DB_PATH,
     EVIDENCE_DIR,
     OWNER_EMBEDDINGS_PATH,
+    base_dir,
     ensure_dirs,
 )
 
@@ -2006,19 +2008,33 @@ def run(
     configure: Callable[[MoeGuardApp], None] | None = None,
 ) -> int:
     """创建 QApplication 并运行萌卫，返回退出码。"""
-    setup_logging()
-    app = QApplication(argv)
-    app.setApplicationName("MoeGuard")
-    app.setApplicationDisplayName("萌卫")
-    companion_icon, _patrol_icon = application_icons()
-    app.setWindowIcon(companion_icon)
-    # 桌宠/托盘应用：关闭窗口不应退出进程
-    app.setQuitOnLastWindowClosed(False)
+    # Acquire before logging/configuration/Qt: all of them can write shared
+    # state or start delivery workers. OS ownership, not file age, is decisive.
+    instance_lock = FileLock(base_dir() / "application.lock")
+    try:
+        acquired = instance_lock.acquire(blocking=False)
+    except OSError:
+        logger.error("app_start_refused reason=state_lock_unavailable")
+        return 1
+    if not acquired:
+        logger.info("app_start_refused reason=already_running")
+        return 0
+    try:
+        setup_logging()
+        app = QApplication(argv)
+        app.setApplicationName("MoeGuard")
+        app.setApplicationDisplayName("萌卫")
+        companion_icon, _patrol_icon = application_icons()
+        app.setWindowIcon(companion_icon)
+        # 桌宠/托盘应用：关闭窗口不应退出进程
+        app.setQuitOnLastWindowClosed(False)
 
-    moeguard = MoeGuardApp()
-    app.aboutToQuit.connect(moeguard.shutdown)
-    if configure is not None:
-        configure(moeguard)
-    moeguard.start()
+        moeguard = MoeGuardApp()
+        app.aboutToQuit.connect(moeguard.shutdown)
+        if configure is not None:
+            configure(moeguard)
+        moeguard.start()
 
-    return app.exec()
+        return app.exec()
+    finally:
+        instance_lock.release()
