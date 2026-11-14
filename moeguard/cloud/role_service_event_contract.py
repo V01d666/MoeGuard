@@ -68,8 +68,7 @@ _LATENCY_ROUTES = frozenset({"account", "tasks", "assets", "results", "events", 
 
 _ONBOARDING_OUTCOMES = frozenset({"acknowledged", "closed"})
 _PATROL_SETUP_OUTCOMES = frozenset({"declined", "owner_skipped", "owner_registered", "closed"})
-# Server-generated announcement IDs (RoleServiceState.publish_announcement):
-# opaque, never user text, so a receipt can name the announcement it is for.
+# Announcement IDs are opaque, never user text; receipts identify their announcement.
 _ANNOUNCEMENT_ID_RE = re.compile(r"ma_[0-9a-f]{24}")
 
 _PROPERTY_LIMITS = {
