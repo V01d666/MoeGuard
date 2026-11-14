@@ -84,12 +84,14 @@ jobs:
 
           tests = sorted(Path('tests').glob('test_*.py'))
           assert tests, 'No test files found'
+          scratch = Path('.pytest-tmp/ci')
+          scratch.mkdir(parents=True, exist_ok=True)
           failed = []
           for index, path in enumerate(tests):
               print(f'Running {path}', flush=True)
               result = subprocess.run([
                   sys.executable, '-m', 'pytest', str(path), '-q', '-p', 'no:cacheprovider',
-                  '--basetemp', str(Path('.pytest-tmp/ci') / f'm{index}'),
+                  '--basetemp', str(scratch / f'm{index}'),
               ], timeout=180)
               if result.returncode:
                   failed.append(str(path))
