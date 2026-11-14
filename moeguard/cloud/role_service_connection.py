@@ -1,13 +1,4 @@
-"""Background connection to the role service and the shared credit summary.
-
-There is no "connect" step for the user.  One ``account_summary`` request both
-proves the link and fetches the balance; it runs at startup, when a service
-surface opens and the cached answer is stale, when the network comes back, and
-after anything that changes the balance.  A failed attempt is retried only on
-those events (plus a short bounded backoff where the OS cannot report network
-changes), never on a timer of its own, so an offline user costs the service
-nothing.
-"""
+'Background connection to the role service and the shared credit summary.'
 
 from __future__ import annotations
 
@@ -96,7 +87,6 @@ class ServiceConnection(QObject):
             self._network.reachabilityChanged.connect(self._reachability_changed)
         transport._on_session = self._session_from_worker
 
-    # -- public API -----------------------------------------------------
 
     @property
     def busy(self) -> bool:
@@ -178,11 +168,10 @@ class ServiceConnection(QObject):
             try:
                 self._finished.emit(result, failure, generation)
             except RuntimeError:
-                pass  # The application exited while the request ran.
+                pass
 
         threading.Thread(target=work, name="moeguard-service-connect", daemon=True).start()
 
-    # -- internals ------------------------------------------------------
 
     def _summary_stale(self) -> bool:
         return (
@@ -229,7 +218,7 @@ class ServiceConnection(QObject):
 
     def _schedule_fallback_retry(self) -> None:
         if self._network is not None:
-            return  # The OS will tell us when the network comes back.
+            return
         if self._fallback_step >= len(FALLBACK_RETRY_SECONDS):
             return
         delay = FALLBACK_RETRY_SECONDS[self._fallback_step]

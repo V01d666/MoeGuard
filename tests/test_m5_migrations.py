@@ -1,4 +1,4 @@
-"""M5-A：旧本地配置与 SQLite 数据升级回归。"""
+'A：旧本地配置与 SQLite 数据升级回归。'
 
 from __future__ import annotations
 

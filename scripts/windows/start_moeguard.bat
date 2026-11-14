@@ -2,7 +2,7 @@
 chcp 65001 > nul 2>&1
 set PYTHONIOENCODING=utf-8
 set PYTHONUNBUFFERED=1
-cd /d "%~dp0"
+cd /d "%~dp0..\.."
 
 if not exist ".venv\Scripts\activate.bat" (
     echo [ERROR] Virtual environment .venv not found.

@@ -35,6 +35,7 @@ It isn't a security camera dressed up as a pet. Think of it as a little partner 
 ## MoeGuard today
 
 - 🎨 **Pet Workshop**: turn a few words or a single image into character art, pick your favorite, then bring it to life; beyond the idle loop, you choose which actions it gets
+- 🎚️ **Their own pace**: adjust playback FPS for the current character in Settings; each character keeps its choice across switches and restarts
 - 🔁 **Always fresh**: add or swap actions, rename, or redesign the whole look anytime, with every earlier version kept safe
 - ⏳ **No babysitting**: see real progress and a time estimate, then walk away; the tray and your pet will call you back when it's done
 - 📦 **Take it with you**: export any character as a folder and import it again later, even on another PC
@@ -55,11 +56,11 @@ When a new version is out, MoeGuard lets you know; just click “更新” (Upda
 Just want the pet? No camera required. The first time you turn on watch duty, MoeGuard explains the risks and asks for your consent
 
 <details>
-<summary>🔎 File verification (v0.4.2)</summary>
+<summary>🔎 File verification (v0.5.0)</summary>
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `MoeGuard-Setup.exe` | 206874814 | `b37c11a1672f54f792b8954e5468b56cce88322f311f5df63eea823f02d0b866` |
+| `MoeGuard-Setup.exe` | 212972057 | `ba468c1a1dba5266b44638d4d338f5727824cca8c3c94c576fea788b07ee0bba` |
 
 </details>
 
@@ -73,7 +74,7 @@ git clone https://github.com/V01d666/MoeGuard.git
 cd MoeGuard
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
-.\start_moeguard.bat
+.\scripts\windows\start_moeguard.bat
 ```
 
 </details>
@@ -87,6 +88,15 @@ MoeGuard itself is free, and the starter characters and watch duty work right aw
 See [Releases](https://github.com/V01d666/MoeGuard/releases) for the full release history
 
 <details open>
+<summary><strong>V0.5</strong></summary>
+
+| Date | Version | Highlights |
+| :--: | :-- | :-- |
+| `11-14` | 🚀 [**v0.5.0**](https://github.com/V01d666/MoeGuard/releases/tag/v0.5.0) | ✨ Improved Workshop generation and delivery; cancellation keeps candidates, and installation stays responsive<br>✨ Playback FPS remembered per character<br>🔧 Better window restoration, action scale and transparent previews; fix growing idle memory use on Windows |
+
+</details>
+
+<details>
 <summary><strong>V0.4</strong></summary>
 
 | Date | Version | Highlights |

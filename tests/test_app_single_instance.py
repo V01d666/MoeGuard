@@ -85,7 +85,7 @@ def test_duplicate_app_exits_before_any_shared_state_or_configuration(tmp_path: 
         assert not workers[0].is_alive()
         assert workers[0].exitcode != 0 if crash else workers[0].exitcode == 0
 
-        # The same data directory can start again, despite the persistent file.
+
         parent, child = context.Pipe()
         pairs.append((parent, child))
         restarted = context.Process(

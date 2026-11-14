@@ -1,8 +1,4 @@
-"""Load authored role assets plus deterministic runtime edge variants.
-
-The package remains an auditable set of source actions.  Runtime-only variants
-can mirror an accepted source without another probabilistic model request.
-"""
+'Load authored role assets plus deterministic runtime edge variants.'
 
 from __future__ import annotations
 
@@ -64,6 +60,7 @@ class RoleInteractionProfile:
 
     edge_reveal_fraction: float = _DEFAULT_EDGE_REVEAL_FRACTION
     click_lines: tuple[str, ...] = ()
+    fps: int = 6
 
 
 @dataclass(frozen=True)
@@ -197,29 +194,46 @@ def load_role_interaction_profile(root: Path) -> RoleInteractionProfile:
     )
 
 
+def resolve_role_fps(root: Path | None, *, fallback: int, override: int | None = None) -> int:
+    if type(override) is int and 1 <= override <= 60:
+        return override
+    value = _read_json(root / "role.json").get("fps") if root is not None else None
+    if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 60:
+        return value
+    return fallback
+
+
 def load_runtime_role_actions(
     controller: FrameAnimationController,
     root: Path,
     *,
     fps: int,
+    fps_override: int | None = None,
 ) -> RoleInteractionProfile:
-    """Load source actions and deterministic runtime edge variants.
+    'Load source actions and deterministic runtime edge variants.'
+    steps = iter_runtime_role_actions(controller, root, fps=fps, fps_override=fps_override)
+    while True:
+        try:
+            next(steps)
+        except StopIteration as result:
+            return result.value
 
-    ``peek_left/right`` are authored in viewer coordinates. If only one side is
-    present, the opposite side is derived by a free horizontal mirror at runtime;
-    users may still generate an independent opposite action later. The internal
-    vertical source is ``peek_bottom`` when a future package provides it, otherwise
-    ``idle``. ``peek_top`` always mirrors that same source vertically. Neither
-    vertical runtime name is exposed as a v0.2 workbench generation option.
-    """
+
+def iter_runtime_role_actions(
+    controller: FrameAnimationController, root: Path, *, fps: int, fps_override: int | None = None,
+):
+    """Use the same transforms incrementally, without pumping a nested event loop."""
+    fps = resolve_role_fps(root, fallback=fps, override=fps_override)
+    normalize_content = _read_json(root / "role.json").get("schema_version") == 2
     for action in _SOURCE_ACTIONS:
         paths = _action_frame_paths(root, action)
         if not paths:
             continue
-        controller.load_action(
+        yield from controller.iter_load_action(
             action,
             paths,
             fps=fps,
+            normalize_content=normalize_content,
             loop=action in _LOOP_ACTIONS,
         )
 
@@ -227,36 +241,41 @@ def load_runtime_role_actions(
     left_paths = _action_frame_paths(root, "peek_left")
     right_paths = _action_frame_paths(root, "peek_right")
     if left_paths and not right_paths:
-        controller.load_action(
+        yield from controller.iter_load_action(
             "peek_right",
             left_paths,
             fps=fps,
+            normalize_content=normalize_content,
             loop=True,
             flip_horizontal=True,
         )
     elif right_paths and not left_paths:
-        controller.load_action(
+        yield from controller.iter_load_action(
             "peek_left",
             right_paths,
             fps=fps,
+            normalize_content=normalize_content,
             loop=True,
             flip_horizontal=True,
         )
 
     vertical_paths = _action_frame_paths(root, "peek_bottom") or idle_paths
     if vertical_paths:
-        controller.load_action(
+        yield from controller.iter_load_action(
             "peek_bottom",
             vertical_paths,
             fps=fps,
+            normalize_content=normalize_content,
             loop=True,
         )
-        controller.load_action(
+        yield from controller.iter_load_action(
             "peek_top",
             vertical_paths,
             fps=fps,
+            normalize_content=normalize_content,
             loop=True,
             flip_vertical=True,
         )
     logger.info("已加载角色运行时动作（缺失动作回退 idle）: %s", root)
-    return load_role_interaction_profile(root)
+    profile = load_role_interaction_profile(root)
+    return RoleInteractionProfile(profile.edge_reveal_fraction, profile.click_lines, fps)

@@ -1,9 +1,4 @@
-"""Provider-neutral custom-role workbench for the v0.2 open client.
-
-The UI owns editable drafts, recoverable task journals, previews, saving and
-installation.  Production generation crosses only the injected role-service
-HTTPS contract; direct provider access lives in an Internal-only module.
-"""
+'Provider-neutral custom-role workbench for the open client.'
 
 from __future__ import annotations
 
@@ -146,15 +141,12 @@ _WORKBENCH_ACTIONS = tuple(
 )
 _TEXT_DETAIL_LIMIT = 480
 _ACK_SETTINGS_KEY = "role_workbench/skip_result_confirmation"
-# Remote polling cadence. The first seconds stay responsive so the UI can show
-# "queued -> running" quickly; afterwards the interval widens because a running
-# generation takes minutes, and one request per second would otherwise spend the
-# account's server-side rate budget and multiply the exposure to transient
-# cross-border network failures.
+
+
 _SERVICE_POLL_SCHEDULE = ((15.0, 1.0), (90.0, 3.0))
 _SERVICE_POLL_MAX_SECONDS = 5.0
-# Error codes that mean "the link failed", not "the task failed". The service
-# task keeps running, so these are reported as an interruption to resume.
+
+
 def _is_insufficient_units(error: object) -> bool:
     return isinstance(error, RoleServiceHttpError) and (
         error.status == 402
@@ -181,14 +173,7 @@ _DIRECTIONAL_OPPOSITES = {
 
 
 def _is_transient_poll_error(error: BaseException) -> bool:
-    """Whether a failed status query should be retried instead of surfaced.
-
-    Polling is a read-only query against an already idempotent submission, so
-    the service keeps working regardless of the answer being lost. Transport
-    faults, rate limiting and server-side unavailability are therefore retried;
-    authentication, quota and contract errors are real answers and must stop
-    the wait so the user can act on them.
-    """
+    'Whether a failed status query should be retried instead of surfaced.'
 
     if isinstance(error, RoleServiceConnectionError):
         return True
@@ -220,14 +205,7 @@ class _ServiceLinkUnavailable(RuntimeError):
 
 
 def _service_poll_interval(waited_seconds: float) -> float:
-    """Widen the polling interval as a task keeps running.
-
-    Generations take minutes, so a fixed one-second cadence would issue
-    hundreds of requests per task. That spends the account's server-side rate
-    budget and, on a lossy cross-border link, makes an interrupted request
-    nearly certain. Early polls stay frequent so the UI reflects the queued to
-    running transition promptly.
-    """
+    'Widen the polling interval as a task keeps running.'
 
     for threshold, interval in _SERVICE_POLL_SCHEDULE:
         if waited_seconds < threshold:
@@ -249,21 +227,14 @@ def _format_wait_estimate(estimated_seconds: int) -> str:
     if estimated_seconds < 60:
         step = 15
         upper = -(-estimated_seconds // step) * step
-        return f"通常不到 {max(upper, step)} 秒"
+        return f"预计约 {max(upper, step)} 秒"
     lower = estimated_seconds // 60
     upper = lower + 1
-    return f"通常需要 {lower}–{upper} 分钟"
+    return f"预计约 {lower}–{upper} 分钟"
 
 
 def _format_wait_status(*, waited_seconds: int, estimated_seconds: int) -> str:
-    """Say how long this wait has run, next to what a wait usually costs.
-
-    Elapsed time is always shown: it is the one number that is certainly true
-    and it distinguishes a service that is working from one that has stopped
-    answering. The estimate is dropped once reality passes it, because
-    repeating it then tells the user the task is late when the honest
-    statement is that it is slower than usual and still running.
-    """
+    'Say how long this wait has run, next to what a wait usually costs.'
 
     waited = max(int(waited_seconds), 0)
     if waited < 60:
@@ -273,7 +244,7 @@ def _format_wait_status(*, waited_seconds: int, estimated_seconds: int) -> str:
     if estimated_seconds > 0 and waited <= estimated_seconds:
         return f"{elapsed} · {_format_wait_estimate(estimated_seconds)}"
     if estimated_seconds > 0:
-        return f"{elapsed} · 比平时久一些，任务仍在云端继续"
+        return f"{elapsed} · 超出预估，任务仍在云端继续"
     return elapsed
 
 
@@ -295,8 +266,6 @@ def _account_summary_text(value: RoleServiceAccountSummary) -> str:
     )
 
 
-# Formerly shown by the one-time "connect" dialog, which no longer exists now
-# that connecting is automatic; the support ID is where users meet the account.
 _SUPPORT_ID_TOOLTIP = (
     "这台电脑的匿名支持编号，反馈问题时提供它即可。"
     "账号随机生成，不需要邮箱，也不读取硬件序列号；"
@@ -420,23 +389,15 @@ def _make_v2_action_previews(
     actions: tuple[str, ...],
     preview_root: Path | None = None,
 ) -> None:
+    from moeguard.roles.editor import write_action_preview
+
     previews = preview_root or (package_root / "previews")
     previews.mkdir(parents=True, exist_ok=True)
     for action in actions:
-        frames = sorted((package_root / "actions" / action).glob("*.png"))
-        images = []
-        for frame in frames:
-            with Image.open(frame) as source:
-                images.append(source.convert("RGBA"))
-        if images:
-            images[0].save(
-                previews / f"{action}.gif",
-                save_all=True,
-                append_images=images[1:],
-                duration=167,
-                loop=0,
-                disposal=2,
-            )
+        write_action_preview(
+            tuple(sorted((package_root / "actions" / action).glob("*.png"))),
+            previews / f"{action}.gif",
+        )
 
 
 def _normalize_uploaded_image(source: Path, output: Path) -> None:
@@ -1437,6 +1398,71 @@ class RoleCreditDialog(QDialog):
         super().closeEvent(event)
 
 
+class _PreviewLabel(QLabel):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._source_pixmap: QPixmap | None = None
+        self._movie: QMovie | None = None
+        self._movie_size = QSize()
+        self._zoom = 1.0
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self.setToolTip("随窗口自动适配；滚轮缩放，双击恢复适配")
+
+    def _stop_movie(self) -> None:
+        if self._movie is not None:
+            self._movie.stop()
+        self._movie = None
+
+    def setPixmap(self, pixmap: QPixmap) -> None:  # noqa: N802
+        self._stop_movie()
+        self._source_pixmap = pixmap
+        self._zoom = 1.0
+        self._render()
+
+    def setText(self, text: str) -> None:  # noqa: N802
+        self._stop_movie()
+        self._source_pixmap = None
+        super().setText(text)
+
+    def setMovie(self, movie: QMovie) -> None:  # noqa: N802
+        self._stop_movie()
+        self._source_pixmap = None
+        self._movie = movie
+        self._zoom = 1.0
+        movie.jumpToFrame(0)
+        self._movie_size = movie.currentImage().size()
+        super().setMovie(movie)
+        self._render()
+
+    def _render(self) -> None:
+        if self._movie is not None:
+            if not self._movie_size.isEmpty():
+                size = self._movie_size.scaled(
+                    self.contentsRect().size() * self._zoom, Qt.KeepAspectRatio
+                )
+                self._movie.setScaledSize(size)
+        elif self._source_pixmap is not None:
+            size = self.contentsRect().size() * self._zoom
+            super().setPixmap(self._source_pixmap.scaled(
+                size, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            ))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._render()
+
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
+        self._zoom = min(4.0, max(0.25, self._zoom * factor))
+        self._render()
+        event.accept()
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        self._zoom = 1.0
+        self._render()
+        event.accept()
+
+
 class RoleWorkbenchDialog(QDialog):
     """One-window workbench for creating and revising managed roles."""
 
@@ -1467,22 +1493,24 @@ class RoleWorkbenchDialog(QDialog):
         connection: Any | None = None,
     ) -> None:
         super().__init__(parent)
+        self.setWindowFlags(
+            (self.windowFlags() & ~Qt.WindowType_Mask)
+            | Qt.Window | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint
+        )
         self._backend = backend
         self._account_id = account_id.strip()
         # The app-wide service connection (role_service_connection): it owns
         # the balance and the link state, so this dialog never asks the user
         # to connect or to refresh.
         self._connection = connection if service_transport is not None else None
-        # Set when the service refused for credits: resuming would repeat the
-        # same refusal, so the button waits for a redeem (C1).
+
+
         self._resume_needs_credits = False
-        # Generation takes minutes the service cannot shorten, so the wait is
-        # worth more spent elsewhere. Calling the user back is what makes
-        # leaving safe; without it, looking away means missing the result.
+
+
         self._notify_user = notify_user
-        # Said once when a task starts, by the pet that is already on screen:
-        # a user who submits and walks away otherwise has no sign anything is
-        # running until it ends.
+
+
         self._announce_wait = announce_wait
         self._wait_announced_for = ""
         self._announce_worker_result = True
@@ -1498,6 +1526,9 @@ class RoleWorkbenchDialog(QDialog):
         self._show_costs = show_costs
         self._worker: _BackendWorker | None = None
         self._current_operation: Callable[[ProgressCallback], object] | None = None
+        self._installing = False
+        self._activation_pending = False
+        self._activation_role: InstalledRole | None = None
         self._current_success: Callable[[object], None] | None = None
         self._refresh_account_after_worker = False
         self._retry_operation: Callable[[ProgressCallback], object] | None = None
@@ -1514,6 +1545,7 @@ class RoleWorkbenchDialog(QDialog):
         self._editing_key: PackageKey | None = None
         self._appearance_source_key: PackageKey | None = None
         self._target_appearance_revision: int | None = None
+        self._next_package_version = 1
         self._revision_pending_install = False
         self._preview_root: Path | None = None
         self._preview_movie: QMovie | None = None
@@ -1531,8 +1563,8 @@ class RoleWorkbenchDialog(QDialog):
         self._client_event_retry_count = 0
         self._client_event_recovery_task_id = ""
         self._last_installed_remote_task_id = ""
-        # Set when a package preview becomes ready, cleared once it is installed;
-        # leaving while set records ``preview_dismissed`` (v0.4.0).
+
+
         self._preview_shown_at: float | None = None
         self._preview_task_id = ""
         self._client_event_home_visible = False
@@ -1987,21 +2019,20 @@ class RoleWorkbenchDialog(QDialog):
         image_row = QHBoxLayout()
         self.image_path = QLineEdit()
         self.image_path.setReadOnly(True)
-        self.image_path.setPlaceholderText("选择一张完整、清晰的二次元角色图")
+        self.image_path.setPlaceholderText("选择角色图片、封面或人设图")
         browse = QPushButton("选择图片…")
         browse.clicked.connect(self._choose_image)
         image_row.addWidget(self.image_path, 1)
         image_row.addWidget(browse)
         image_layout.addLayout(image_row)
         self.image_hint = QLabel(
-            "单角色静态全身图，头脚完整、无遮挡；暂不支持多视图或三视图。\n"
-            "用简单背景，复杂场景或截图可能闪烁、漂浮。"
+            "可尝试封面、多视图或复杂背景；请在下方说明要保留的角色与特征，并预览确认结果。"
         )
         self.image_hint.setWordWrap(True)
-        self.image_hint.setStyleSheet(f"color: {theme.DANGER}; font-weight: 600;")
+        self.image_hint.setProperty("role", "hint")
         image_warning = QFrame()
         image_warning.setProperty("flatCard", True)
-        image_warning.setProperty("role", "dangerSection")
+
         warning_layout = QVBoxLayout(image_warning)
         warning_layout.setContentsMargins(*theme.CARD_MARGINS)
         warning_layout.addWidget(self.image_hint)
@@ -2009,7 +2040,7 @@ class RoleWorkbenchDialog(QDialog):
         self.must_preserve = QLineEdit()
         self.must_preserve.setMaxLength(60)
         self.must_preserve.setPlaceholderText(
-            "保留或微调的特征（可选，如右侧马尾、蓝色蝴蝶结）"
+            "可选：选定角色、保留特征或微调造型，如只保留中央人物、去掉帽子"
         )
         image_layout.addWidget(self.must_preserve)
 
@@ -2129,9 +2160,8 @@ class RoleWorkbenchDialog(QDialog):
         recovery_action_row.addWidget(self.cancel_task_button, 1)
         recovery_action_row.addWidget(self.resume_task_button, 1)
         generation_controls.addLayout(main_action_row)
-        # Beside the generate button because every user passes it: a user
-        # without enough generations learns it, and where to redeem, before
-        # pressing generate rather than from a refusal afterwards.
+
+
         self.credit_hint_row = QWidget()
         credit_hint_layout = QHBoxLayout(self.credit_hint_row)
         credit_hint_layout.setContentsMargins(0, 0, 0, 0)
@@ -2196,7 +2226,7 @@ class RoleWorkbenchDialog(QDialog):
         self.action_selector.itemSelectionChanged.connect(
             self._update_regenerate_enabled
         )
-        self.preview = QLabel("暂无动作预览")
+        self.preview = _PreviewLabel("候选与动作会在这里预览")
         self.preview.setAlignment(Qt.AlignCenter)
         self.preview.setMinimumSize(320, 240)
         self.preview.setStyleSheet("border: 1px solid #d9d9d9; border-radius: 8px;")
@@ -2278,11 +2308,7 @@ class RoleWorkbenchDialog(QDialog):
         self._update_credit_hint()
 
     def _credit_shortfall(self) -> str:
-        """Why the next step cannot be paid for, judged from the cached balance.
-
-        Only a hint: the service decides, and a balance up to a few minutes
-        old may be stale, so the generate button stays enabled.
-        """
+        'Why the next step cannot be paid for, judged from the cached balance.'
         connection = self._connection
         summary = getattr(connection, "summary", None)
         if summary is None or not self._generation_available:
@@ -2293,7 +2319,7 @@ class RoleWorkbenchDialog(QDialog):
             flexible += summary.available_units - categorized
         if self._ui_stage == 1:
             if self.input_tabs.currentIndex() != 0:
-                return ""  # An uploaded identity image costs no generation.
+                return ""
             needed = self.candidate_count.value()
             left = summary.available_t2i_units + flexible
             kind = "立绘"
@@ -2628,7 +2654,9 @@ class RoleWorkbenchDialog(QDialog):
         busy = self._worker is not None
         self.prepare_button.setVisible(self._ui_stage == 1)
         self.generate_button.setVisible(self._ui_stage == 2)
-        self.cancel_task_button.setVisible(busy)
+        self.cancel_task_button.setVisible(
+            busy and not (self._installing or self._activation_pending)
+        )
         self.resume_task_button.setVisible(
             not busy and self.resume_task_button.isEnabled()
         )
@@ -2650,17 +2678,25 @@ class RoleWorkbenchDialog(QDialog):
         self._set_ui_stage(1)
         self.status.setText("请修改角色设定；完成后重新生成身份候选。")
 
-    def _refresh_editable_roles(self, selected: PackageKey | None = None) -> None:
-        self.edit_role_selector.clear()
-        self.edit_role_selector.addItem("新建角色", None)
+    def _editable_roles(self) -> tuple[tuple[InstalledRole, bool, str], ...]:
         try:
             installed_roles = self._role_library.list()
         except OSError:
             installed_roles = ()
-        for installed in installed_roles:
-            if installed.package.source_schema_version != 2:
-                continue
-            editable, reason = self._role_editability(installed.key)
+        return tuple(
+            (installed, *self._role_editability(installed.key, installed=installed))
+            for installed in installed_roles if installed.package.source_schema_version == 2
+        )
+
+    def _refresh_editable_roles(
+        self, selected: PackageKey | None = None, *,
+        roles: tuple[tuple[InstalledRole, bool, str], ...] | None = None,
+    ) -> None:
+        self.edit_role_selector.clear()
+        self.edit_role_selector.addItem("新建角色", None)
+        if roles is None:
+            roles = self._editable_roles()
+        for installed, editable, reason in roles:
             self.edit_role_selector.addItem(
                 f"{installed.display_name}（v{installed.key.package_version}）"
                 + ("" if editable else " · 仅可运行"),
@@ -2865,9 +2901,11 @@ class RoleWorkbenchDialog(QDialog):
             )
 
     def _editable_role_context(
-        self, key: PackageKey
+        self, key: PackageKey, *, installed: InstalledRole | None = None,
     ) -> tuple[InstalledRole, CharacterProfile, Path, Path, WorkbenchRequest]:
-        installed = self._role_library.get(key)
+        installed = installed or self._role_library.get(key)
+        if installed.key != key:
+            raise ValueError("角色版本与编辑资料不匹配")
         package = installed.package
         if package.source_schema_version != 2 or not package.installable:
             raise ValueError("只能编辑已通过审查的 v2 角色包")
@@ -2889,13 +2927,15 @@ class RoleWorkbenchDialog(QDialog):
         request.validate()
         return installed, profile, identity_path, input_path or identity_path, request
 
-    def _role_editability(self, key: PackageKey) -> tuple[bool, str]:
+    def _role_editability(
+        self, key: PackageKey, *, installed: InstalledRole | None = None,
+    ) -> tuple[bool, str]:
         """Describe local edit capability without exposing contract internals."""
         try:
-            self._editable_role_context(key)
+            self._editable_role_context(key, installed=installed)
         except (OSError, RoleContractError, ValueError):
             try:
-                installed = self._role_library.get(key)
+                installed = installed or self._role_library.get(key)
                 package = installed.package
                 self._draft_store.load_profile_revision(
                     key.role_id, package.appearance_revision
@@ -2930,13 +2970,24 @@ class RoleWorkbenchDialog(QDialog):
         self.image_path.setText(input_path.name if request.input_mode == "image" else "")
         self.input_tabs.setCurrentIndex(0 if request.input_mode == "text" else 1)
 
-    def open_installed_role(self, key: PackageKey) -> None:
+    def open_installed_role(
+        self, key: PackageKey, *,
+        context: tuple[InstalledRole, CharacterProfile, Path, Path, WorkbenchRequest] | None = None,
+        preview_root: Path | None = None,
+        next_package_version: int | None = None,
+    ) -> None:
         """Open one managed v2 role without copying or mutating its package."""
         installed, _profile, identity_path, input_path, request = (
-            self._editable_role_context(key)
+            context or self._editable_role_context(key)
         )
+        if installed.key != key:
+            raise ValueError("角色版本与编辑资料不匹配")
         package = installed.package
 
+        self._next_package_version = (
+            self._role_library.next_version(key.role_id)
+            if next_package_version is None else next_package_version
+        )
         self._editing_key = key
         self._candidate_task_id = ""
         self._package_task_id = ""
@@ -2974,12 +3025,13 @@ class RoleWorkbenchDialog(QDialog):
         self.candidates.addItem(item)
         self.candidates.setCurrentRow(0)
 
-        self._preview_root = session / "source-previews"
-        _make_v2_action_previews(
-            installed.root,
-            tuple(action for action, _ in package.actions),
-            self._preview_root,
-        )
+        self._preview_root = preview_root or (session / "source-previews")
+        if preview_root is None:
+            _make_v2_action_previews(
+                installed.root,
+                tuple(action for action, _ in package.actions),
+                self._preview_root,
+            )
         self._populate_package_actions(self._package_result, self._preview_root)
         self.save_button.setEnabled(True)
         self._configure_action_picker(editing=True)
@@ -3000,6 +3052,7 @@ class RoleWorkbenchDialog(QDialog):
         if target_revision <= profile.appearance_revision:
             raise ValueError("无法分配新的形象档案修订号")
 
+        self._next_package_version = self._role_library.next_version(key.role_id)
         self._editing_key = None
         self._candidate_task_id = ""
         self._package_task_id = ""
@@ -3146,7 +3199,7 @@ class RoleWorkbenchDialog(QDialog):
         self._update_action_options_summary()
         self._update_credit_hint()
         if self._editing_key is not None:
-            next_version = self._role_library.next_version(self._editing_key.role_id)
+            next_version = self._next_package_version
             self.generate_button.setText(f"生成 {count} 个动作并创建 v{next_version}")
             self.generate_button.setEnabled(
                 self._generation_available
@@ -3157,9 +3210,7 @@ class RoleWorkbenchDialog(QDialog):
             )
             return
         if self._appearance_source_key is not None:
-            next_version = self._role_library.next_version(
-                self._appearance_source_key.role_id
-            )
+            next_version = self._next_package_version
             self.generate_button.setText(
                 f"生成新形象的 {count} 个动作并创建 v{next_version}"
             )
@@ -3243,14 +3294,7 @@ class RoleWorkbenchDialog(QDialog):
         self.detail_budget.setStyleSheet("color: #b42318;" if invalid else "")
 
     def _compiled_text_details(self) -> str:
-        """Assemble the appearance prompt from the description fields only.
-
-        The name is deliberately absent. It labels the package folder and the
-        pet's caption, defaults to a Chinese phrase, and is not art direction;
-        feeding it to the image model made that phrase appear written in the
-        corner of generated candidates. What the character looks like must
-        come only from the fields below it.
-        """
+        'Assemble the appearance prompt from the description fields only.'
 
         values = (
             ("Visual style and mood", self.style_text.text()),
@@ -3679,18 +3723,7 @@ class RoleWorkbenchDialog(QDialog):
     def _preflight_service_link(
         self, local_task_id: str, progress: ProgressCallback
     ) -> None:
-        """Answer a dead link before the first byte of a task is uploaded.
-
-        A task starts by uploading a reference image of a few megabytes. Behind
-        a stalled proxy that upload crawls to a timeout and retries, so the user
-        waits minutes to learn something the service could have said at once --
-        which is exactly what a maintainer hit with a VPN node that had stopped
-        forwarding.
-
-        Skipped once a task has been submitted: a resumed task already exists on
-        the service, and refusing to poll it because a probe failed would strand
-        a task that is still running.
-        """
+        'Answer a dead link before the first byte of a task is uploaded.'
 
         transport = self._service_transport
         probe = getattr(transport, "preflight", None)
@@ -3719,6 +3752,8 @@ class RoleWorkbenchDialog(QDialog):
         if self._service_client is None or self._service_transport is None:
             raise ValueError("工作台服务客户端尚未配置")
         self._preflight_service_link(local_task_id, progress)
+        if self._service_client.request_store.load(local_task_id) is None:
+            progress("正在准备并上传参考素材…", 1)
         service_request = self._prepare_service_request(local_task_id, context)
         if self._task_store.load(local_task_id).status == "cancel_requested":
             self._task_store.acknowledge_cancel(local_task_id)
@@ -4003,7 +4038,13 @@ class RoleWorkbenchDialog(QDialog):
                 "该 provider task，因此已禁止重提。"
             )
 
+    def set_activation_pending(self, pending: bool) -> None:
+        """Extend install/close guards until the app finishes preparing its frames."""
+        self._activation_pending = pending
+        self._set_busy(pending or self._worker is not None)
+
     def _set_busy(self, busy: bool) -> None:
+        busy = busy or self._activation_pending
         if busy:
             random.shuffle(self._activity_faces)
             self._rotate_activity_indicator()
@@ -4040,7 +4081,9 @@ class RoleWorkbenchDialog(QDialog):
         self.prepare_button.setEnabled(
             self._generation_available and not busy and self._editing_key is None
         )
-        self.cancel_task_button.setEnabled(busy)
+        self.cancel_task_button.setEnabled(
+            busy and not (self._installing or self._activation_pending)
+        )
         self.resume_task_button.setEnabled(
             self._generation_available
             and not busy
@@ -4119,6 +4162,7 @@ class RoleWorkbenchDialog(QDialog):
         self.regenerate_button.setEnabled(
             self._generation_available
             and self._worker is None
+            and not self._activation_pending
             and self._package_result is not None
             and bool(selected_actions)
             and not self._revision_pending_install
@@ -4127,6 +4171,7 @@ class RoleWorkbenchDialog(QDialog):
     def _update_install_enabled(self) -> None:
         self.install_button.setEnabled(
             self._worker is None
+            and not self._activation_pending
             and self._package_result is not None
         )
 
@@ -4141,15 +4186,13 @@ class RoleWorkbenchDialog(QDialog):
         if self._worker is not None:
             return
         if announce_result:
-            # New user work (a smaller request, a resume after redeeming)
-            # clears the credit block; housekeeping queries do not.
+
+
             self._resume_needs_credits = False
         self._current_operation = operation
         self._current_success = success
-        # Housekeeping queries run through this same plumbing but are not work
-        # the user asked for. Announcing them delivers a second native balloon
-        # for one finished task, which teaches people to dismiss the one that
-        # actually carries a result.
+
+
         self._announce_worker_result = announce_result
         worker = _BackendWorker(operation)
         self._worker = worker
@@ -4211,13 +4254,13 @@ class RoleWorkbenchDialog(QDialog):
             self.status.setText("兑换成功；生成次数已经到账。")
             self._resume_needs_credits = False
             if self._active_task_id:
-                # A task refused for credits may be resumed now (C1).
+
                 self.resume_task_button.setEnabled(
                     self._generation_available and self._can_resume_active_task()
                 )
             if self._connection is None:
-                # The shared connection already took the balance from the
-                # redeem response.
+
+
                 self._refresh_account_summary(quiet=True)
 
     def _prepare_candidates(self) -> None:
@@ -4408,9 +4451,7 @@ class RoleWorkbenchDialog(QDialog):
             self._update_action_emphasis()
             return
         pixmap = QPixmap(str(item.data(Qt.UserRole)))
-        self.preview.setPixmap(
-            pixmap.scaled(self.preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        )
+        self.preview.setPixmap(pixmap)
         self._update_generation_selection()
         self._update_action_emphasis()
 
@@ -4480,7 +4521,7 @@ class RoleWorkbenchDialog(QDialog):
         self._preview_root = None
         self._revision_pending_install = False
         self._clear_action_previews()
-        self.preview.setText(f"正在生成所选 {len(actions)} 个动作，请保持 MoeGuard 运行…")
+        self.preview.setText(f"正在准备所选 {len(actions)} 个动作的参考素材…")
         context = _WorkbenchTaskContext(
             operation="initial_package",
             result_kind="package",
@@ -4747,7 +4788,17 @@ class RoleWorkbenchDialog(QDialog):
         self._package_result = value
         self._package_key = None
         self._result_saved = False
-        self._preview_root = value.package_root / "previews"
+        self._preview_root = (
+            self._backend.storage_root / "state" / "preview-cache"
+            / sha256(str(value.package_root).encode()).hexdigest()
+        )
+        package = RolePackage.from_json(
+            (value.package_root / "role.json").read_text(encoding="utf-8")
+        )
+        _make_v2_action_previews(
+            value.package_root, tuple(action for action, _ in package.actions),
+            self._preview_root,
+        )
         actions = self._populate_package_actions(value, self._preview_root)
         self.save_button.setEnabled(True)
         self._update_regenerate_enabled()
@@ -4846,7 +4897,7 @@ class RoleWorkbenchDialog(QDialog):
         if not path.is_file():
             return
         movie = QMovie(str(path))
-        movie.setScaledSize(QSize(240, 210))
+
         self._preview_movie = movie
         self.preview.setMovie(movie)
         movie.start()
@@ -5010,57 +5061,100 @@ class RoleWorkbenchDialog(QDialog):
         self._result_saved = True
 
     def _request_install(self) -> None:
-        if self._package_result is None:
+        if self._activation_pending or self._worker is not None or self._package_result is None:
             return
         if not self._confirm_result_use("保存并安装角色"):
             return
         package_task_id = self._package_task_id
         remote_task_id = self._remote_task_id(package_task_id)
-        try:
-            if self._package_key is None:
-                if self._editing_key is None and self._active_request is not None:
-                    _write_package_identity(
-                        self._package_result.package_root,
-                        self._active_request,
-                    )
-                _accept_generated_package(self._package_result.package_root)
-                installed = self._role_library.install_directory(
-                    self._package_result.package_root,
-                    display_name=(
-                        self._active_request.display_name
-                        if self._appearance_source_key is not None
-                        and self._active_request is not None else None
-                    ),
+        source = self._package_result.package_root
+        key, request = self._package_key, self._active_request
+        editing_key = self._editing_key
+        display_name = (
+            request.display_name
+            if self._appearance_source_key is not None and request is not None else None
+        )
+        ready_previews = self._preview_root
+
+        def operation(progress: ProgressCallback) -> object:
+            progress("正在保存并安装角色…", 0)
+            if key is None:
+                if editing_key is None and request is not None:
+                    _write_package_identity(source, request)
+                package = _accept_generated_package(source)
+                staged = InstalledRole(
+                    key=PackageKey(package.role_id, package.package_version),
+                    package=package, root=source,
                 )
             else:
-                installed = self._role_library.get(self._package_key)
-        except (OSError, RoleContractError) as exc:
-            QMessageBox.critical(
-                self,
-                "角色安装失败",
-                f"{exc}\n\n旧版本和当前桌宠均未改动。",
+                staged = self._role_library.get(key)
+            # Check editable inputs before the immutable library commit.
+            context = self._editable_role_context(staged.key, installed=staged)
+            previews = ready_previews
+            actions = tuple(action for action, _ in staged.package.actions)
+            if previews is None or any(
+                not (previews / f"{action}.gif").is_file() for action in actions
+            ):
+                previews = self._backend.storage_root / f"install-previews-{uuid.uuid4().hex}"
+                _make_v2_action_previews(staged.root, actions, previews)
+            roles = self._editable_roles()
+            next_package_version = max(
+                self._role_library.next_version(staged.key.role_id),
+                staged.key.package_version + 1,
             )
-            return
+            installed = (
+                self._role_library.install_directory(source, display_name=display_name)
+                if key is None else staged
+            )
+            roles = [
+                (
+                    replace(item, name=installed.name)
+                    if item.key.role_id == installed.key.role_id else item,
+                    editable, reason,
+                )
+                for item, editable, reason in roles if item.key != installed.key
+            ]
+            roles.append((installed, True, ""))
+            roles.sort(key=lambda row: row[0].key)
+            return (
+                installed, (installed, *context[1:]), tuple(roles), previews, next_package_version,
+            )
 
-        self._refresh_editable_roles(installed.key)
-        self._result_saved = True
-        self.open_installed_role(installed.key)
-        self.status.setText(
-            f"{installed.display_name} v{installed.key.package_version} "
-            "已安全安装；旧版本仍可在设置中回滚。"
-        )
-        if package_task_id == self._preview_task_id:
-            self._preview_shown_at = None
-            self._preview_task_id = ""
-        if remote_task_id:
-            self._last_installed_remote_task_id = remote_task_id
-            self._record_client_event(
-                "install_succeeded",
-                remote_task_id=remote_task_id,
-                properties={"package_ready": True},
-                once_key=f"{package_task_id}:install_succeeded",
+        def success(value: object) -> None:
+            installed, context, roles, previews, next_package_version = value
+            self._package_key = installed.key
+            self._refresh_editable_roles(installed.key, roles=roles)
+            self._result_saved = True
+            self.open_installed_role(
+                installed.key, context=context, preview_root=previews,
+                next_package_version=next_package_version,
             )
-        self.install_requested.emit(installed.key)
+            self.status.setText(
+                f"{installed.display_name} v{installed.key.package_version} "
+                "已安全安装；旧版本仍可在设置中回滚。"
+            )
+            if package_task_id == self._preview_task_id:
+                self._preview_shown_at = None
+                self._preview_task_id = ""
+            if remote_task_id:
+                self._last_installed_remote_task_id = remote_task_id
+                self._record_client_event(
+                    "install_succeeded",
+                    remote_task_id=remote_task_id,
+                    properties={"package_ready": True},
+                    once_key=f"{package_task_id}:install_succeeded",
+                )
+            self._activation_role = installed  # Already fully verified by the install worker.
+            self.install_requested.emit(installed.key)
+
+        def failure(error: object) -> None:
+            self.status.setText("角色安装失败，请重试。")
+            QMessageBox.critical(
+                self, "角色安装失败", f"{error}\n\n旧版本和当前桌宠均未改动。",
+            )
+
+        self._installing = True
+        self._start_worker(operation, success, failure, announce_result=False)
 
     def record_role_activated(self) -> None:
         """Record activation only after the application confirms the role switch."""
@@ -5186,6 +5280,9 @@ class RoleWorkbenchDialog(QDialog):
         # running or finished and never how far along it is, so anything
         # smoother than this would be invented.
         self.status.setText(message)
+        if self._active_task_context is not None:
+            if self._active_task_context.result_kind == "package":
+                self.preview.setText(message)
         self._activity_percent = percent if 0 < percent < 100 else 0
         self._rotate_activity_indicator()
 
@@ -5194,9 +5291,8 @@ class RoleWorkbenchDialog(QDialog):
         choices = [face for face in self._activity_faces if face not in current]
         face = random.choice(choices or self._activity_faces)
         percent = getattr(self, "_activity_percent", 0)
-        # The rotating face says the app is alive; the percentage says the task
-        # is. Keeping them in one label means the timer cannot wipe out the
-        # measured value a moment after it arrives.
+
+
         suffix = f" {percent}%" if percent else ""
         self.activity_indicator.setText(f"{face}  正在认真制作中…{suffix}")
 
@@ -5288,10 +5384,8 @@ class RoleWorkbenchDialog(QDialog):
             self._show_content_rejected_dialog(message)
             return
         if _is_insufficient_units(error):
-            # C1 (G13, 2026-10-12): resuming repeats the same request, which the
-            # service refuses again until the balance changes -- G13 pressed
-            # "resume" straight into a second refusal.  Say what is missing,
-            # re-read the balance, and keep resume for after a redeem.
+
+
             self._refresh_account_summary(quiet=True)
             shortfall = self._credit_shortfall() or message
             self.status.setText(f"次数不足：{shortfall}")
@@ -5318,10 +5412,8 @@ class RoleWorkbenchDialog(QDialog):
             self.resume_task_button.setEnabled(self._generation_available)
         self.status.setText(f"任务未完成：{message}")
         if self._client_error_code(error) in _NETWORK_ERROR_CODES:
-            # The wait ended, but the service task is unaffected by a lost
-            # connection and is very likely still running. Saying "failed"
-            # here is what drove users to retry repeatedly against a task
-            # that was already producing a result.
+
+
             QMessageBox.warning(
                 self,
                 "网络中断，任务仍在云端继续",
@@ -5355,9 +5447,8 @@ class RoleWorkbenchDialog(QDialog):
                 ),
             },
         )
-        # Deliberately not role_service_user_message: that copy ends in "resume
-        # the same task", which is written for a fault during the wait. Here no
-        # task was ever created.
+
+
         if (
             isinstance(cause, RoleServiceConnectionError)
             and cause.code == "service_timeout"
@@ -5439,6 +5530,8 @@ class RoleWorkbenchDialog(QDialog):
         self._start_worker(operation, success)
 
     def _request_task_cancel(self) -> None:
+        if self._installing:
+            return
         if self._worker is None or not self._worker.isRunning():
             return
         if self._active_task_id:
@@ -5462,6 +5555,12 @@ class RoleWorkbenchDialog(QDialog):
         )
 
     def _on_cancelled(self) -> None:
+        keep_candidates = (
+            self._active_task_context is not None
+            and self._active_task_context.result_kind == "package"
+            and self._candidate_result is not None
+            and self.candidates.count() > 0
+        )
         self._record_client_event(
             "wait_interrupted",
             remote_task_id=self._remote_task_id(self._active_task_id),
@@ -5483,17 +5582,21 @@ class RoleWorkbenchDialog(QDialog):
             self._active_task_context = None
         self._retry_operation = None
         self._retry_success = None
-        self._candidate_result = None
+        if not keep_candidates:
+            self._candidate_result = None
+            self.candidates.clear()
         self._package_result = None
         self._package_key = None
         self._preview_root = None
-        self.candidates.clear()
         self._clear_action_previews()
         self.save_button.setEnabled(False)
         self.install_button.setEnabled(False)
-        self._set_ui_stage(1)
+        self._set_ui_stage(2 if keep_candidates else 1)
+        if keep_candidates:
+            self._candidate_selected(self.candidates.currentRow())
         self.status.setText(
-            "已在安全点取消，没有新结果；已提交的任务请恢复，不要重新生成。"
+            "已请求取消动作生成，身份候选已保留。"
+            if keep_candidates else "已请求取消，没有新结果。"
         )
 
     def _worker_finished(self) -> None:
@@ -5501,6 +5604,7 @@ class RoleWorkbenchDialog(QDialog):
         refresh_account = self._refresh_account_after_worker
         self._refresh_account_after_worker = False
         self._worker = None
+        self._installing = False
         self._current_operation = None
         self._current_success = None
         self._set_busy(False)
@@ -5512,18 +5616,29 @@ class RoleWorkbenchDialog(QDialog):
     def has_running_task(self) -> bool:
         """True while a service call is in flight; an app restart must wait."""
 
-        return self._worker is not None and self._worker.isRunning()
+        return self._activation_pending or (
+            self._worker is not None and self._worker.isRunning()
+        )
 
-    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
-        if self._worker is not None and self._worker.isRunning():
+    def _confirm_close(self) -> bool:
+        if self._activation_pending or self._worker is not None:
             QMessageBox.information(
                 self,
                 "任务仍在运行",
                 "请等当前步骤完成后再关闭，以保留任务。",
             )
-            event.ignore()
-            return
+            return False
         if self.isVisible() and not self._confirm_leave_unsaved_result("关闭工作台"):
+            return False
+        return True
+
+    def reject(self) -> None:
+        if self._confirm_close():
+            super().reject()
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        if not self._confirm_close():
             event.ignore()
             return
-        super().closeEvent(event)
+        super().reject()
+        event.accept()

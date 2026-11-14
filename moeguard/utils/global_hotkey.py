@@ -1,19 +1,4 @@
-"""全局热键注册（Windows Win32 RegisterHotKey）。
-
-D18 老板键/伪装模式：系统级全局热键，无论焦点在哪都生效。
-在非 Windows 平台上回退到 QShortcut（仅应用内有焦点时生效）。
-
-实现要点：
-- RegisterHotKey 必须在 PeekMessageW 轮询线程内部调用
-  （Win32 将 WM_HOTKEY 投递到注册线程的消息队列）。
-- 注册失败（热键已占用）时自动回退到 QShortcut。
-
-用法:
-    hotkey = GlobalHotkey()
-    hotkey.register("Ctrl+Shift+H")
-    hotkey.activated.connect(callback)
-    hotkey.unregister()
-"""
+'全局热键注册（Windows Win32 RegisterHotKey）。'
 
 from __future__ import annotations
 
@@ -25,7 +10,7 @@ from PySide6.QtCore import QObject, Qt, Signal
 
 logger = logging.getLogger(__name__)
 
-# Win32 常量
+
 _MOD_ALT = 0x0001
 _MOD_CONTROL = 0x0002
 _MOD_SHIFT = 0x0004
@@ -82,7 +67,7 @@ class GlobalHotkey(QObject):
             self.registration_failed.emit()
             return
 
-        # 解析键序列
+
         from PySide6.QtGui import QKeySequence
 
         ks = QKeySequence(sequence)
@@ -96,7 +81,7 @@ class GlobalHotkey(QObject):
         qt_key = key_comb.key()
         qt_mods = key_comb.keyboardModifiers().value
 
-        # 转换 Win32 修饰键
+
         win_mods = 0
         for qt_mod, win_mod in _QT_TO_WIN_MOD.items():
             if qt_mods & qt_mod.value:

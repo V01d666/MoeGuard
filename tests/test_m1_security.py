@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""M1 安防感知模块测试脚本。
-
-验证 FaceRecognizer + OwnerProfile 的基本功能。
-不依赖 PySide6，可在无 GUI 环境运行。
-不产生真人影像（使用合成图像）。
-
-运行方式（仓库根目录）:
-    python3 tests/test_m1_security.py
-"""
+'安防感知模块测试脚本。'
 
 from __future__ import annotations
 
@@ -17,7 +9,6 @@ from pathlib import Path
 
 import numpy as np
 
-# 确保项目根目录在 path 中
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
@@ -55,7 +46,7 @@ def test_owner_profile_basic() -> None:
     from moeguard.security.owner import OwnerProfile
 
     config = SecurityConfig()
-    # 不传入 recognizer，仅测试数据管理逻辑
+
     owner = OwnerProfile.__new__(OwnerProfile)
     owner._config = config  # type: ignore[attr-defined]
     owner._recognizer = None  # type: ignore[attr-defined]
@@ -63,17 +54,17 @@ def test_owner_profile_basic() -> None:
 
     assert not owner.is_registered()
 
-    # 模拟注册
+
     fake_embedding = np.random.randn(512).astype(np.float32)
     owner._owner_embeddings = [fake_embedding]  # type: ignore[attr-defined]
     assert owner.is_registered()
 
-    # 导出/加载
+
     exported = owner.embeddings()
     assert len(exported) == 1
     assert np.array_equal(exported[0], fake_embedding)
 
-    # 清空
+
     owner._owner_embeddings = []  # type: ignore[attr-defined]
     assert not owner.is_registered()
     print("[PASS] OwnerProfile basic (register/export/clear)")
@@ -92,14 +83,14 @@ def test_owner_profile_store() -> None:
         crypto = CryptoBox(key_path)
         store = OwnerProfileStore(store_path, crypto)
 
-        # 保存
+
         embeddings = [
             np.random.randn(512).astype(np.float32),
             np.random.randn(512).astype(np.float32),
         ]
         store.save(embeddings)
 
-        # 加载
+
         loaded = store.load()
         assert len(loaded) == 2
         for orig, ld in zip(embeddings, loaded):
@@ -235,29 +226,29 @@ def test_evidence_store() -> None:
         base = Path(tmp) / "evidence"
         store = EvidenceStore(base, retention_days=7)
 
-        # 创建事件目录
+
         import time
         ts = time.time()
         event_dir = store.create_event_dir(ts)
         assert event_dir.exists()
         assert event_dir.is_dir()
 
-        # 列出事件
+
         events = store.list_events()
         assert len(events) == 1
 
-        # 过期清理（创建一个 8 天前的目录，并修改 mtime 使其看起来过期）
+
         old_ts = ts - 8 * 86400
         old_dir = store.create_event_dir(old_ts)
         assert old_dir.exists()
-        # 目录的 mtime 是创建时间（当前），需手动修改为过期时间
+
         import os
         os.utime(old_dir, (old_ts, old_ts))
 
         cleaned = store.cleanup_expired(ts)
         assert cleaned >= 1
         assert not old_dir.exists()
-        assert event_dir.exists()  # 新的不被清理
+        assert event_dir.exists()
 
         print("[PASS] EvidenceStore create/list/cleanup")
 
@@ -270,17 +261,17 @@ def test_database() -> None:
         db = Database(Path(tmp) / "test.db")
         db.connect()
 
-        # 记录事件
+
         import time
         now = time.time()
         db.log_incident(now, "stranger", "/evidence/event1")
         db.log_incident(now + 1, "stranger", "/evidence/event2")
 
-        # 查询
+
         results = db.incidents_since(now - 1)
         assert len(results) == 2
 
-        # 值守会话
+
         session_id = db.log_patrol_session(now, now + 60, 2, "lock_screen")
         assert session_id > 0
 
@@ -293,7 +284,7 @@ def test_database() -> None:
 
 
 def test_config_alignment() -> None:
-    """配置对齐 D16 决议。"""
+    '配置对齐 决议。'
     from moeguard.config import SecurityConfig
 
     config = SecurityConfig()
@@ -301,7 +292,7 @@ def test_config_alignment() -> None:
     assert config.recognizer_model == "face_recognition_sface_2021dec.onnx"
     assert config.face_match_threshold == 0.363
     assert config.stranger_cooldown_sec == 30
-    print("[PASS] Config alignment with D16 (YuNet+SFace, threshold=0.363)")
+    print("[PASS] Config defaults (YuNet+SFace)")
 
 
 def test_paths() -> None:
@@ -312,7 +303,7 @@ def test_paths() -> None:
     assert paths.evidence_dir() == Path.home() / ".moeguard" / "evidence"
     assert paths.owner_dir() == Path.home() / ".moeguard" / "owner"
     assert paths.MODELS_DIR == Path.home() / ".moeguard" / "models"
-    print("[PASS] Paths module (PRD §7.2: ~/.moeguard/)")
+    print("[PASS] Paths module")
 
 
 def test_license_updated() -> None:
@@ -320,7 +311,7 @@ def test_license_updated() -> None:
     import moeguard
 
     assert moeguard.__license__ == "Apache-2.0", f"Expected Apache-2.0, got {moeguard.__license__}"
-    print("[PASS] License = Apache-2.0 (D6/D27)")
+    print("[PASS] License = Apache-2.0")
 
 
 def main() -> int:

@@ -66,14 +66,14 @@ class EvidenceDialog(QDialog):
         self._events.currentItemChanged.connect(self._update_selection_actions)
         layout.addWidget(self._events, 1)
 
-        # 空状态：轻量文案占位，列表为空时显示（不遮挡列表交互）
+
         self._empty_hint = QLabel("暂无证据事件\n发生陌生人或运动事件后会出现在这里。")
         self._empty_hint.setProperty("role", "hint")
         self._empty_hint.setAlignment(Qt.AlignCenter)
         self._empty_hint.setWordWrap(True)
         layout.addWidget(self._empty_hint)
 
-        # 操作行：左侧普通查看操作，右侧危险删除操作
+
         actions = QHBoxLayout()
         actions.setSpacing(8)
         self.open_folder_button = QPushButton("打开证据文件夹")

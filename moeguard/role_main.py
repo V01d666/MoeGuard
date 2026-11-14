@@ -1,12 +1,9 @@
-"""v0.2 client entrypoint with an injected HTTPS custom-role workbench."""
+'client entrypoint with an injected HTTPS custom-role workbench.'
 
 from __future__ import annotations
 
 import sys
 
-# Velopack's install/update hooks start this executable with hook arguments and
-# expect it to exit from inside run(); nothing heavier may load before that.
-# A no-op for source runs and for builds without the velopack wheel.
 if __name__ == "__main__":
     from moeguard.updater import run_velopack_startup
 
@@ -60,20 +57,11 @@ from moeguard.cloud.role_workbench import (  # noqa: E402
 from moeguard.roles import PackageKey, RoleLibrary  # noqa: E402
 from moeguard.utils.paths import ROLE_WORKBENCH_DIR, resource_path  # noqa: E402
 
-# How often latency samples are sent and the day boundary is re-checked.
 TELEMETRY_PERIOD_MS = 30 * 60 * 1000
 
 
 class AppTelemetry(QObject):
-    """App-wide v0.4.0 heartbeats that do not belong to the workshop.
-
-    ``daily_active`` (at most one per local day) answers whether the pet is
-    still on the desktop -- with a valid stored session v0.3.0 started
-    without any request, so nothing showed an installed copy was in use.
-    ``network_sample`` reports client-measured request latency per route
-    family. Both carry only enums and numbers, never names, paths or text,
-    and neither ever raises into the app.
-    """
+    'App-wide heartbeats that do not belong to the workshop.'
 
     def __init__(
         self,
@@ -100,9 +88,8 @@ class AppTelemetry(QObject):
 
     def start(self) -> None:
         self.record_daily_active()
-        # Events queued by the previous run (e.g. the exit-time network
-        # sample) otherwise wait for the next recorded event; send them now,
-        # in the background.  A delivery already running makes this a no-op.
+
+
         try:
             self.reporter.flush_async()
         except Exception:  # noqa: BLE001 - telemetry never affects the app
@@ -118,11 +105,7 @@ class AppTelemetry(QObject):
         self.record_network_samples()
 
     def record_event(self, event_name: str, properties: dict[str, object]) -> bool:
-        """App-level UI events (v0.4.1: onboarding / guard setup / mailbox).
-
-        Callers pass only enum and number properties; ``screen`` defaults to
-        ``runtime`` and ``entrypoint`` to ``startup`` unless given.
-        """
+        'App-level UI events (onboarding / guard setup / mailbox).'
         return self._record(event_name, properties)
 
     def _record(self, event_name: str, properties: dict[str, object]) -> bool:
@@ -221,7 +204,7 @@ def configure_role_workbench(
     shared_tracker: PreviewClientEventTracker | None = client_event_tracker
 
     def event_tracker() -> PreviewClientEventTracker:
-        # One tracker (one outbox file and one sequence) for every reporter.
+
         nonlocal shared_tracker
         if shared_tracker is None:
             shared_tracker = PreviewClientEventTracker(
@@ -275,8 +258,8 @@ def configure_role_workbench(
         app._telemetry = telemetry
         role_service_http_client.set_request_observer(latency.observe)
         updater.set_feed_observer(latency.observe)
-        # After the connection starts, so the first heartbeat reuses the
-        # session that startup request establishes.
+
+
         app.ready.connect(telemetry.start)
         qt_app = QApplication.instance()
         if qt_app is not None:
@@ -367,12 +350,28 @@ def configure_role_workbench(
             if not isinstance(key, PackageKey):
                 QMessageBox.critical(dialog, "角色切换失败", "工作台返回了无效角色版本。")
                 return
-            success, message = app.activate_managed_role(key, role_library=library)
-            if success:
-                dialog.record_role_activated()
-                QMessageBox.information(dialog, "角色已切换", message)
-            else:
-                QMessageBox.critical(dialog, "角色切换失败", message)
+            if dialog._activation_pending:
+                return
+            dialog.set_activation_pending(True)
+            dialog.status.setText("角色已安装，正在准备桌宠；当前桌宠继续运行…")
+
+            def activated(success: bool, message: str) -> None:
+                from shiboken6 import isValid
+
+                if not isValid(dialog):
+                    return
+                dialog.set_activation_pending(False)
+                if app._shutdown_started:
+                    return
+                if success:
+                    dialog.record_role_activated()
+                    dialog.status.setText(message)
+                else:
+                    QMessageBox.critical(dialog, "角色切换失败", message)
+
+            app.activate_managed_role_async(
+                key, activated, role_library=library, prepared_role=dialog._activation_role,
+            )
 
         dialog.install_requested.connect(install)
         return dialog
@@ -415,9 +414,8 @@ def configure_role_workbench(
     app._mailbox_dialog_factory = make_mailbox
     app._mailbox_watcher = None
     if configured_origin:
-        # v0.4.1: without this nobody ever saw an announcement -- the mailbox
-        # only fetched when opened from Settings.  Check at startup and every
-        # few hours; the tray shows the unread count and one notice per item.
+
+
         def watched_thread() -> tuple[object | None, str]:
             account_id = stored_account_id()
             if connection is None or not account_id:
@@ -446,8 +444,8 @@ def configure_role_workbench(
                 dialog.set_connection(connection.transport, account_id)
             watcher = app._mailbox_watcher
             if watcher is not None and account_id and not watcher.has_thread:
-                # The startup check ran before the session existed; fetch the
-                # author replies now that it does.
+
+
                 watcher.check(force=True)
 
         connection.connected.connect(update_open_mailbox)
@@ -456,8 +454,8 @@ def configure_role_workbench(
 def main() -> int:
     def configure(app: MoeGuardApp) -> None:
         configure_role_workbench(app, pilot_notice_enabled=True)
-        # Update-enabled builds embed a public source; ordinary builds have
-        # no source. MOEGUARD_UPDATE_FEED remains an explicit experiment override.
+
+
         from moeguard.update_controller import configure_self_update
 
         app._update_controller = configure_self_update(app)

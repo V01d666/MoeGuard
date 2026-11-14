@@ -1,4 +1,4 @@
-"""Versioned local acknowledgement for the v0.2 Preview data notice."""
+'Versioned local acknowledgement for the Preview data notice.'
 
 from __future__ import annotations
 

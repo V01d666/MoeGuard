@@ -167,7 +167,7 @@ def test_unread_announcements_filtering_plain_text_and_restart(tmp_path):
     dialog.refresh()
     _wait(dialog)
     assert dialog.inbox.count() == 2 and dialog.announcements.count() == 1
-    # v0.4.1: tab labels carry the unread count (none when all read).
+
     assert dialog.tabs.tabText(0) == "留言与回复 (1)"
     assert dialog.tabs.tabText(1) == "公告 (1)"
     assert unread_counts[-1] == 2
@@ -181,7 +181,7 @@ def test_unread_announcements_filtering_plain_text_and_restart(tmp_path):
     restarted, _ = _dialog(tmp_path)
     restarted.refresh()
     _wait(restarted)
-    assert restarted.tabs.tabText(0) == "留言与回复"  # the read reply stays read
+    assert restarted.tabs.tabText(0) == "留言与回复"
     assert restarted.tabs.tabText(1) == "公告 (1)"
     restarted.mark_all_button.click()
     assert restarted.tabs.tabText(1) == "公告"

@@ -165,11 +165,7 @@ class VisualIdentity:
 
 @dataclass(frozen=True)
 class CharacterProfile:
-    """The editable v0.2 appearance profile; never a provider request snapshot.
-
-    Personality is intentionally a separately versioned future section. Its
-    edits must not invalidate an accepted identity image or generated actions.
-    """
+    'The editable appearance profile; never a provider request snapshot.'
 
     profile_id: str
     appearance_revision: int

@@ -1,11 +1,4 @@
-"""Keep the mouse wheel from editing number boxes, drop-downs and sliders.
-
-Qt lets the wheel change a spin box, combo box or slider just by hovering it,
-so a user scrolling a long form silently edits every value the pointer passes
-over.  ``guard_wheel(root)`` makes those inputs ignore the wheel and hands it
-to the nearest enclosing scroll area instead, so the page keeps scrolling.
-Values still change by typing, the arrow buttons, the keyboard or a click.
-"""
+'Keep the mouse wheel from editing number boxes, drop-downs and sliders.'
 
 from __future__ import annotations
 
@@ -75,9 +68,9 @@ def guard_wheel(root: QWidget) -> int:
     for cls in _GUARDED:
         for widget in root.findChildren(cls):
             if isinstance(widget, QScrollBar) or widget.property(_MARK):
-                continue  # scroll bars exist to take the wheel
+                continue
             widget.setProperty(_MARK, True)
-            # The default WheelFocus would also move keyboard focus on scroll.
+
             widget.setFocusPolicy(Qt.StrongFocus)
             widget.installEventFilter(guard)
             count += 1

@@ -1,20 +1,4 @@
-"""桌宠反馈呈现：动作、表情、文字气泡。
-
-根据应用状态与安防事件，驱动帧动画的帧组切换并输出台词。
-MVP 阶段为「动画 + 文字气泡」；语音 TTS 为付费增强，后续接入。
-
-设计要点：告警即情绪价值--「主人回来时口头汇报可疑情况」让安防告警
-本身成为桌宠的「邀功」，而非冷冰冰的通知。
-
-D38 兼容动作分类（旧 9 个帧组）：
-  idle / notice / click_reaction / dragging /
-  peek_left / peek_right / sit_down / patrol / welcome
-
-关键约束：
-- 如果某动作的帧未加载（路径为空），fallback 到 idle 并 log.warning。
-- alert_stranger 静默克制，不弹气泡以免惊动陌生人。
-- _base_mood 记忆"陪伴/值守"底态，交互动画结束后恢复正确底态而非硬编码 idle。
-"""
+'按交互和状态事件选择动作、台词与提示。'
 
 from __future__ import annotations
 
@@ -28,7 +12,7 @@ from moeguard.pet.frame_animation import FrameAnimationController
 
 logger = logging.getLogger(__name__)
 
-# 点击反馈台词库（M3 中期盲测第一优先级——每次点击随机一条）
+
 _CLICK_LINES: list[str] = [
     "哎呀别戳我～",
     "干嘛呀～",
@@ -53,12 +37,12 @@ def _random_click_line(lines: tuple[str, ...] = ()) -> str:
 class PetMood(Enum):
     """桌宠情绪状态。"""
 
-    IDLE = auto()  # 陪伴待机
-    HAPPY = auto()  # 主人回来
-    ALERT = auto()  # 陌生人出现（静默记录，克制）
-    PATROL = auto()  # 值守中
-    WELCOME = auto()  # 欢迎迎宾
-    EDGE = auto()  # 贴边半免打扰
+    IDLE = auto()
+    HAPPY = auto()
+    ALERT = auto()
+    PATROL = auto()
+    WELCOME = auto()
+    EDGE = auto()
 
 
 class FeedbackController(QObject):
@@ -88,7 +72,7 @@ class FeedbackController(QObject):
         self._pet = pet_window
         self._frames = frame_controller
         self._mood = PetMood.IDLE
-        self._base_mood = PetMood.IDLE  # 陪伴/值守底态
+        self._base_mood = PetMood.IDLE
         self._drag_active = False
         self._patrol_scan_next = "patrol_look_left"
         self._edge_direction: str | None = None
@@ -103,9 +87,6 @@ class FeedbackController(QObject):
         """Replace click dialogue when the active role changes."""
         self._click_lines = lines
 
-    # ------------------------------------------------------------------ #
-    # 状态机事件回调（设置底态）
-    # ------------------------------------------------------------------ #
 
     def on_companion(self) -> None:
         """进入陪伴模式：底态=IDLE，播放 idle 帧组。"""
@@ -125,19 +106,15 @@ class FeedbackController(QObject):
         self.message.emit("主人放心去吧，这里交给我看守～")
 
     def alert_stranger(self) -> None:
-        """检测到陌生人：ALERT -> 播放 alert 帧组。
-
-        静默克制，不弹气泡以免惊动对方。
-        D38: alert 动作帧组对应 notice（警觉注意）。
-        """
+        '检测到陌生人：ALERT -> 播放 alert 帧组。'
         self._mood = PetMood.ALERT
-        # alert 帧组在 D38 中对应 notice（警觉注意）
-        # 优先用 alert，不存在则 fallback notice
+
+
         if self._frames.has_action("alert"):
             self._play_action("alert", ping_pong=False)
         else:
             self._play_action("notice", ping_pong=False)
-        # 不 emit message，静默克制
+
 
     def greet_return(self, had_incidents: bool) -> None:
         """主人回座：WELCOME -> 播放 welcome 帧组。
@@ -154,9 +131,6 @@ class FeedbackController(QObject):
         else:
             self.message.emit("主人你回来啦～我看守得很认真哦，一切平安～")
 
-    # ------------------------------------------------------------------ #
-    # 交互动画结束后的恢复
-    # ------------------------------------------------------------------ #
 
     def restore_animation(self) -> None:
         """交互动画播放完毕，恢复到当前底态（陪伴 idle / 值守 patrol）。
@@ -174,9 +148,6 @@ class FeedbackController(QObject):
             self._mood = PetMood.IDLE
             self._play_action("idle", ping_pong=True)
 
-    # ------------------------------------------------------------------ #
-    # 交互事件回调（D38 状态切换类）
-    # ------------------------------------------------------------------ #
 
     def on_click(self) -> None:
         """点击触摸反应：播放 click_reaction + 随机气泡台词。
@@ -190,7 +161,7 @@ class FeedbackController(QObject):
 
     def on_drag_start(self) -> None:
         """拖拽开始：先一次性被抓起，再保持被拖拽的受力姿态。"""
-        # 一旦重新抓起，旧贴边状态失效；松手后的新位置会再次发出 edge_snapped。
+
         self._edge_direction = None
         self._drag_active = True
         if self._frames.has_action("drag_pickup"):
@@ -256,8 +227,8 @@ class FeedbackController(QObject):
             "bottom": "peek_bottom",
         }[direction]
         if direction in {"left", "right"}:
-            # 左右探头先在藏身位停留 1 秒，完整探出后再停留约 1.3 秒。
-            # 这样不降低动作本身的帧率，既减少打扰，也保留一次探头的存在感。
+
+
             self._play_action(
                 action,
                 ping_pong=True,
@@ -273,9 +244,6 @@ class FeedbackController(QObject):
         if callable(clear):
             clear()
 
-    # ------------------------------------------------------------------ #
-    # 内部辅助
-    # ------------------------------------------------------------------ #
 
     def _play_action(
         self,
@@ -298,7 +266,7 @@ class FeedbackController(QObject):
                 start_hold_frames=start_hold_frames,
                 end_hold_frames=end_hold_frames,
             )
-            # 触发 PetWindow 重绘
+
             if hasattr(self._pet, "update"):
                 self._pet.update()
         elif self._frames.has_action("idle") and action_name != "idle":

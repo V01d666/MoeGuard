@@ -215,9 +215,8 @@ class RoleDraftStore:
                 "input dimensions must be at least 64x64 and at most 16 megapixels",
                 "input",
             )
-        # Re-encode every user reference into a managed PNG.  This removes
-        # EXIF/XMP/ICC metadata and prevents local paths, camera identifiers or
-        # location tags from crossing the role-service boundary.
+
+
         payload = normalized_identity_png(source)
         if len(payload) > _INPUT_LIMIT_BYTES:
             fail(

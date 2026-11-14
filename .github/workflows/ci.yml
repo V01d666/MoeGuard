@@ -9,13 +9,12 @@ permissions:
 
 jobs:
   quality:
-    # This workflow is carried by the internal allowlist into the clean public
-    # source tree.  Do not run it against the larger private development tree.
     if: github.repository == 'V01d666/MoeGuard'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       QT_QPA_PLATFORM: offscreen
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - name: Check out source
         uses: actions/checkout@v5
@@ -23,7 +22,49 @@ jobs:
       - name: Set up Python 3.12
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: '3.12'
+
+      - name: Check client source boundary
+        run: |
+          python - <<'PY'
+          import ast
+          import io
+          import re
+          import subprocess
+          import tokenize
+          from pathlib import Path
+
+          cloud = {
+              '__init__.py', 'role_service.py', 'role_service_binding.py',
+              'role_service_bootstrap.py', 'role_service_client_events.py',
+              'role_service_connection.py', 'role_service_event_contract.py',
+              'role_service_http_client.py', 'role_service_mailbox_contract.py',
+              'role_service_mailbox_client.py', 'role_service_mailbox_dialog.py',
+              'role_service_session.py', 'role_workbench.py',
+          }
+          paths = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
+          forbidden = {'docs', 'deploy', 'ops-exports', 'artifacts', '.moeguard', '.venv', 'evidence'}
+          private_reference = re.compile(r'\bD\d{2,}(?:-\d+)?\b|\bPRD\b|作者裁决|作者定稿|author decision', re.I)
+          for name in filter(None, paths):
+              path = Path(name)
+              assert not path.is_symlink(), name
+              assert not set(path.parts) & forbidden, name
+              assert path.name not in {'DEVELOPMENT.md', 'AGENTS.md', '.env'}, name
+              assert path.suffix.lower() not in {'.enc', '.key', '.pem', '.p12', '.pfx', '.db'}, name
+              if name.startswith('moeguard/cloud/'):
+                  assert path.parent == Path('moeguard/cloud') and path.name in cloud, name
+              if name.startswith('scripts/'):
+                  assert name == 'scripts/windows/start_moeguard.bat', name
+              if path.suffix == '.py':
+                  text = path.read_text(encoding='utf-8-sig')
+                  tree = ast.parse(text)
+                  notes = [t.string for t in tokenize.generate_tokens(io.StringIO(text).readline) if t.type == tokenize.COMMENT]
+                  notes += [ast.get_docstring(n) or '' for n in ast.walk(tree) if isinstance(n, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))]
+                  assert not any(private_reference.search(n) for n in notes), name
+          for name in ('LICENSE', 'NOTICE', 'resources/models/YuNet-LICENSE.txt', 'scripts/windows/start_moeguard.bat'):
+              assert Path(name).is_file(), name
+          print('Client source boundary: PASS')
+          PY
 
       - name: Install Linux runtime libraries
         run: sudo apt-get update && sudo apt-get install --yes libegl1 libgl1 libglib2.0-0
@@ -35,4 +76,22 @@ jobs:
         run: python -m ruff check .
 
       - name: Test
-        run: python -m pytest -q -p no:cacheprovider
+        run: |
+          python - <<'PY'
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          tests = sorted(Path('tests').glob('test_*.py'))
+          assert tests, 'No test files found'
+          failed = []
+          for index, path in enumerate(tests):
+              print(f'Running {path}', flush=True)
+              result = subprocess.run([
+                  sys.executable, '-m', 'pytest', str(path), '-q', '-p', 'no:cacheprovider',
+                  '--basetemp', str(Path('.pytest-tmp/ci') / f'm{index}'),
+              ], timeout=180)
+              if result.returncode:
+                  failed.append(str(path))
+          assert not failed, f'Failed test files: {failed}'
+          PY

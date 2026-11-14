@@ -1,15 +1,4 @@
-"""Client mailbox privacy helpers and bounded local read markers.
-
-Message bodies and diagnostics are never cached here. Read markers contain
-only SHA-256 fingerprints and timestamps, expire after 30 days, and are capped
-at 200 entries / 32 KiB. Opening the store prunes expired entries; clear() lets
-the user remove the remaining metadata.
-
-v0.4.1: ``unread_mail`` computes what is unread for the background watcher
-(startup + every few hours, no content stored); the watcher keeps a second
-store of the same format for "already announced in the tray", so a notice is
-shown once per item (again after the 30-day marker expiry if still unread).
-"""
+'Client mailbox privacy helpers and bounded local read markers.'
 
 from __future__ import annotations
 
@@ -32,7 +21,7 @@ READ_MARKER_RETENTION_SECONDS = 30 * 24 * 60 * 60
 MAX_READ_MARKERS = 200
 MAX_READ_MARKER_BYTES = 32 * 1024
 _DIGEST_RE = re.compile(r"^[a-f0-9]{64}$")
-# Same shape the event contract accepts for receipts (server-generated IDs).
+
 ANNOUNCEMENT_ID_RE = re.compile(r"ma_[0-9a-f]{24}")
 
 
@@ -40,8 +29,8 @@ ANNOUNCEMENT_ID_RE = re.compile(r"ma_[0-9a-f]{24}")
 class UnreadMail:
     """One unread item: an announcement or an author reply (title kept in memory only)."""
 
-    kind: str  # "announcement" | "reply"
-    key: str  # read fingerprint, as the mailbox dialog computes it
+    kind: str
+    key: str
     title: str
     announcement_id: str = ""  # set only for receipt-safe announcement IDs
 
@@ -181,5 +170,5 @@ class MailboxReadStore:
         self._write(seen)
 
     def clear(self) -> None:
-        # Unlinking the marker also recovers a corrupt file, without reading it.
+
         self.path.unlink(missing_ok=True)

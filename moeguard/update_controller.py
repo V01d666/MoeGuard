@@ -116,8 +116,8 @@ class UpdateController(QObject):
         if failed_target:
             self.state = "apply_failed"
             self._set_status("上次更新未完成，当前版本可继续使用；解除占用后可手动重试。")
-            # Configuration runs before the tray is created. Deliver the
-            # notice after app.start(), when the event loop becomes ready.
+
+
             QTimer.singleShot(0, self._notify_failed_apply)
             return
         if self._auto_check_enabled:
@@ -295,8 +295,8 @@ def configure_self_update(
 
     env = os.environ if environ is None else environ
     try:
-        # An explicit empty override disables updates for the process. Normal
-        # users receive the non-secret HTTPS source embedded by the builder.
+
+
         feed = env[FEED_ENV].strip() if FEED_ENV in env else bundled_feed(bundled_feed_path)
         if not feed:
             return None

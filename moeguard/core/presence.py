@@ -14,9 +14,11 @@
 
 from __future__ import annotations
 
+import ctypes
 import logging
 import sys
 import time
+from ctypes import wintypes
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QEvent, QObject, QTimer, Signal
 
@@ -28,11 +30,14 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Windows 锁屏/解锁消息常量
 # ---------------------------------------------------------------------------
-_WM_WTSSESSION_CHANGE = 0x02B1  # Windows 消息: 会话状态变化
+_WM_WTSSESSION_CHANGE = 0x02B1
 _WTS_SESSION_LOCK = 0x7  # 会话锁定（锁屏）
 _WTS_SESSION_UNLOCK = 0x8  # 会话解锁
 # WTSRegisterSessionNotification 选项
 _NOTIFY_FOR_THIS_SESSION = 0x0
+
+# POINTER retains its structure type, so never construct that type per message.
+_MSG_POINTER = ctypes.POINTER(wintypes.MSG)
 
 
 class _WinSessionFilter(QAbstractNativeEventFilter):
@@ -53,25 +58,7 @@ class _WinSessionFilter(QAbstractNativeEventFilter):
         返回 True 表示拦截该消息，False 表示继续传递。
         """
         try:
-            # eventType 在 Windows 上为 b"windows_generic_MSG"
-            # message 是 MSG 结构体指针（sip.voidptr 或 int）
-            import ctypes
-
-            # 将 message 解释为 MSG 结构体指针
-            # MSG: { HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam,
-            #        DWORD time, POINT pt }
-            class _MSG(ctypes.Structure):
-                _fields_ = [
-                    ("hwnd", ctypes.c_void_p),
-                    ("message", ctypes.c_uint),
-                    ("wParam", ctypes.c_size_t),
-                    ("lParam", ctypes.c_ssize_t),
-                    ("time", ctypes.c_uint),
-                    ("pt_x", ctypes.c_long),
-                    ("pt_y", ctypes.c_long),
-                ]
-
-            msg = ctypes.cast(int(message), ctypes.POINTER(_MSG)).contents
+            msg = ctypes.cast(int(message), _MSG_POINTER).contents
             if msg.message == _WM_WTSSESSION_CHANGE:
                 if msg.wParam == _WTS_SESSION_LOCK:
                     logger.debug("WTS_SESSION_LOCK 事件")
@@ -81,21 +68,11 @@ class _WinSessionFilter(QAbstractNativeEventFilter):
                     self._monitor.screen_unlocked.emit()
         except Exception:
             logger.exception("解析 Windows 会话消息失败")
-        return False  # 不拦截，继续传递
+        return False
 
 
 class LockScreenMonitor(QObject):
-    """锁屏/解锁事件监听器。
-
-    平台支持：
-    - Windows: WTSRegisterSessionNotification + WM_WTSSESSION_CHANGE
-    - macOS: 预留（NSDistributedNotificationCenter），暂未实现
-    - Linux/其他: 不支持，install() 优雅 no-op
-
-    信号：
-    - screen_locked:   屏幕锁定（进入值守触发）
-    - screen_unlocked: 屏幕解锁（退出值守触发，D15 权威退出信号）
-    """
+    '锁屏/解锁事件监听器。'
 
     screen_locked = Signal()
     screen_unlocked = Signal()
@@ -141,11 +118,7 @@ class LockScreenMonitor(QObject):
 
             wtsapi32 = ctypes.windll.wtsapi32  # type: ignore[attr-defined]
 
-            # WTSRegisterSessionNotification(HWND, NOTIFY_FOR_THIS_SESSION)
-            # 需要一个有效的 HWND 来接收 WM_WTSSESSION_CHANGE 消息。
-            # 对于 QApplication，使用其顶层窗口的 winId，或者
-            # 创建一个隐藏的接收窗口。
-            # NOTIFY_FOR_THIS_SESSION = 0，仅接收当前会话事件。
+
             hwnd = 0  # NULL: 系统向调用线程的消息队列发送通知
             # 部分系统上 NULL 不被接受，尝试使用有效的 top-level HWND
             from PySide6.QtWidgets import QWidget
@@ -153,7 +126,7 @@ class LockScreenMonitor(QObject):
             if tl_widgets:
                 hwnd = int(tl_widgets[0].winId())
             else:
-                # 没有顶层 widget：创建一个隐藏接收窗口获取有效 HWND
+
                 dummy = QWidget()
                 hwnd = int(dummy.winId())
 
@@ -162,7 +135,7 @@ class LockScreenMonitor(QObject):
             )
             if not result:
                 err = ctypes.get_last_error()
-                # 错误码 0 在某些 Windows 版本上实际表示成功
+
                 if err == 0:
                     logger.info("WTSRegisterSessionNotification 已注册（hwnd=%d）", hwnd)
                     self._wts_registered = True
@@ -171,12 +144,12 @@ class LockScreenMonitor(QObject):
                         "WTSRegisterSessionNotification 失败（错误码 %d），"
                         "锁屏值守将不可用，手动值守仍可正常使用", err
                     )
-                    # 不 return，继续安装事件过滤器以便可能捕获消息
+
             else:
                 self._wts_registered = True
                 logger.info("Windows 锁屏/解锁监听已安装（hwnd=%d）", hwnd)
 
-            # 安装原生事件过滤器（即使 WTS 注册失败也安装，以便可能捕获消息）
+
             self._filter = _WinSessionFilter(self)
             app.installNativeEventFilter(self._filter)
 
@@ -233,8 +206,8 @@ class PresenceDetector(QObject):
     - PresenceDetector:  键鼠空闲（延迟触发，补充场景）
     """
 
-    owner_present = Signal()  # 检测到用户活动恢复
-    owner_away = Signal()  # 键鼠空闲达阈值
+    owner_present = Signal()
+    owner_away = Signal()
 
     _ACTIVITY_EVENTS = (
         QEvent.MouseButtonPress,
@@ -250,7 +223,7 @@ class PresenceDetector(QObject):
         self._last_activity: float = time.time()
         self._is_present: bool = True
         self._timer = QTimer(self)
-        self._timer.setInterval(1000)  # 每秒检查一次空闲
+        self._timer.setInterval(1000)
         self._timer.timeout.connect(self._tick)
         self._app: QObject | None = None
 
@@ -274,7 +247,7 @@ class PresenceDetector(QObject):
             if not self._is_present:
                 self._is_present = True
                 self.owner_present.emit()
-        return False  # 不拦截事件
+        return False
 
     def _tick(self) -> None:
         if self._is_present and (time.time() - self._last_activity) >= self._idle_threshold:

@@ -1,25 +1,4 @@
-"""Opt-in self-update through Velopack, with MoeGuard owning the network.
-
-Velopack replaces the program folder and restarts the app; the user data under
-``%USERPROFILE%\\.moeguard`` is outside that folder and is never touched.
-
-Two deliberate departures from the stock integration:
-
-* **MoeGuard downloads, Velopack installs.**  Velopack's HTTP source appends
-  ``localVersion``, ``id`` and a persistent random ``stagingId`` to every feed
-  request, and ``UpdateManager(None)`` silently talks to the vendor's hosted
-  service.  Neither is acceptable for an anonymous product whose data notice
-  promises that checking for updates carries no identity.  So this module
-  fetches the static feed and packages itself -- plain GETs, no query string,
-  no credentials, no cookies, no redirects -- verifies every file's SHA-256,
-  and hands Velopack a local staging directory to install from.
-* **Velopack is optional at import time.**  Source checkouts, tests and builds
-  without the ``velopack`` wheel run unchanged; the updater simply reports that
-  it is unavailable.
-
-Nothing here runs unless a feed is configured, and nothing restarts the app
-without the caller asking for it.
-"""
+'Opt-in self-update through Velopack, with MoeGuard owning the network.'
 
 from __future__ import annotations
 
@@ -145,9 +124,6 @@ def bundled_feed(path: Path | None = None) -> str:
     return validate_public_feed_url(config["feed_url"])
 
 
-# -- startup ----------------------------------------------------------------
-
-
 def _load_velopack(module: Any | None = None) -> Any | None:
     if module is not None:
         return module
@@ -160,14 +136,7 @@ def _load_velopack(module: Any | None = None) -> Any | None:
 def run_velopack_startup(
     *, velopack_module: Any | None = None, frozen: bool | None = None
 ) -> bool:
-    """Hand control to Velopack's install/update hooks before anything else.
-
-    Must run first in the entry point: during install, update and uninstall
-    Velopack starts the app with hook arguments and expects it to exit from
-    inside ``run()``.  Auto-apply is off because an update must never restart
-    the app behind a running generation task or an active patrol; applying is
-    always an explicit call.  Returns whether Velopack ran.
-    """
+    "Hand control to Velopack's install/update hooks before anything else."
 
     if not (getattr(sys, "frozen", False) if frozen is None else frozen):
         return False
@@ -186,7 +155,6 @@ def run_velopack_startup(
     return True
 
 
-# Whether ``run_velopack_startup`` handed this process to Velopack (telemetry).
 _velopack_started = False
 
 
@@ -219,7 +187,6 @@ def install_kind(
         return "unknown"
 
 
-# -- feed latency (v0.4.0 ``network_sample``, route ``updates``) -------------
 FeedObserver = Callable[[str, int, bool], None]
 _feed_observer: FeedObserver | None = None
 
@@ -239,16 +206,13 @@ def _observe_feed(started: float, ok: bool) -> None:
         pass
 
 
-# -- feed and transfer ------------------------------------------------------
-
-
 def _source_kind(source: str) -> str:
     parsed = urllib.parse.urlsplit(source)
     if parsed.scheme == "https" and parsed.hostname:
         kind = "https"
     elif parsed.scheme == "http" and parsed.hostname in _LOOPBACK_HOSTS:
         kind = "http-loopback"
-    elif not parsed.scheme or len(parsed.scheme) == 1:  # "D:\\feed" parses as scheme "d"
+    elif not parsed.scheme or len(parsed.scheme) == 1:
         if not Path(source).is_absolute():
             raise UpdateError("update feed directory must be an absolute path")
         return "directory"
@@ -265,8 +229,8 @@ class _RejectRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def _default_opener() -> urllib.request.OpenerDirector:
-    # No cookie processor, no proxy auth, no redirects: the request carries
-    # nothing beyond the path and a fixed User-Agent.
+
+
     return urllib.request.build_opener(_RejectRedirect())
 
 
@@ -401,9 +365,6 @@ def download_asset(
     return target
 
 
-# -- the updater ------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class UpdateOffer:
     version: str
@@ -446,13 +407,13 @@ class Updater:
             self._packages_dir = Path(locator.PackagesDir)
             self._current_dir = Path(locator.CurrentBinaryDir)
         elif getattr(sys, "frozen", False) and sys.platform == "win32":
-            # The manager has already validated that this is a Velopack install.
-            # Windows packages put the real executable in root/current.
+
+
             self._current_dir = Path(sys.executable).resolve().parent
             self._install_root = self._current_dir.parent
             self._packages_dir = self._install_root / "packages"
-        # Keep the receipt outside staging (checks clear staging), and scope it
-        # to this installation so another portable copy cannot consume it.
+
+
         installation = os.path.normcase(os.path.abspath(sys.executable))
         key = hashlib.sha256(installation.encode("utf-8")).hexdigest()[:24]
         self._attempt_path = self.staging_dir.parent / f"update-attempt-{key}.json"
@@ -486,7 +447,7 @@ class Updater:
         except OSError as exc:
             raise UpdateError("update staging directory is unavailable") from exc
         except Exception:
-            # Not a Velopack install (a source run or a hand-copied folder).
+
             logger.info("self-update unavailable in this installation", exc_info=True)
             return None
 
@@ -541,8 +502,8 @@ class Updater:
         (self.staging_dir / f"releases.{CHANNEL}.json").write_text(
             json.dumps({"Assets": list(assets)}, ensure_ascii=True), encoding="utf-8"
         )
-        # Velopack decides full versus delta from its own local packages, so
-        # the offer names exactly the files it is about to read.
+
+
         info = self._manager.check_for_updates()
         if info is None:
             return None
@@ -589,8 +550,8 @@ class Updater:
             if not offer.is_delta:
                 raise UpdateError("update could not be prepared") from None
             logger.warning("delta update failed; fetching the full package", exc_info=True)
-        # Velopack falls back to the full package when a delta cannot be
-        # applied; stage it and let the same call take that path.
+
+
         download_asset(
             self.source, offer.full, self.staging_dir, opener=self._opener, progress=progress
         )
@@ -608,8 +569,8 @@ class Updater:
 
         requirements = [(self.staging_dir.parent, 0)]
         if self._packages_dir is not None and self._install_root is not None:
-            # Recheck after download and any patrol/task deferral. Use actual
-            # uncompressed sizes for extraction, rather than delta size.
+
+
             try:
                 with zipfile.ZipFile(self._packages_dir / offer.full["FileName"]) as package:
                     unpacked = sum(item.file_size for item in package.infolist())
@@ -623,9 +584,8 @@ class Updater:
             if self._current_dir is not None:
                 requirements.append((self._current_dir, 0))
         _check_storage(tuple(requirements))
-        # The native installer runs after we exit, so its result cannot be
-        # caught here. On failure it restarts the old app too. Persist the
-        # intended transition before handing over, then inspect it at startup.
+
+
         temporary = self._attempt_path.with_suffix(".tmp")
         try:
             temporary.write_text(

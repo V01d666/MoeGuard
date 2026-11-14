@@ -1,11 +1,4 @@
-"""主人注册与人脸比对。
-
-管理主人多角度人脸特征（1 张起步 + 日常渐进补充），并据此判定
-画面中出现的是主人还是陌生人。主人特征经加密后本地存储（见 storage）。
-
-classify 逻辑：画面中有人脸但无人匹配主人 → 陌生人检测。
-D15: 人脸识别结果不驱动状态转换，解锁事件才是权威退出信号。
-"""
+'本地主人特征注册与比对；识别结果不切换值守状态。'
 
 from __future__ import annotations
 
@@ -25,7 +18,7 @@ class OwnerProfile:
     def __init__(self, config: SecurityConfig, recognizer: FaceRecognizer) -> None:
         self._config = config
         self._recognizer = recognizer
-        self._owner_embeddings: list[np.ndarray] = []  # 渐进补充的多角度样本
+        self._owner_embeddings: list[np.ndarray] = []
 
     def is_registered(self) -> bool:
         """主人是否已注册。"""

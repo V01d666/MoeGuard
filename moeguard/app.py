@@ -1,22 +1,4 @@
-"""应用组装与生命周期管理。
-
-MoeGuardApp 负责把桌宠形象、安防核心、状态机、UI 等子系统装配在一起，
-并管理它们的启动顺序与退出时资源释放。
-
-信号接线（M1+M2+M3）：
-- lock_monitor.screen_locked -> state_machine.on_lock_screen
-- lock_monitor.screen_unlocked -> state_machine.on_unlock
-- state_machine.patrol_started -> camera.start + feedback.on_patrol_start +
-  tray.set_state(True)
-- state_machine.patrol_ended -> camera.stop + feedback.greet_return +
-  tray.set_state(False) + db.log_patrol_session
-- state_machine.stranger_detected -> evidence.record + db.log_incident +
-  feedback.alert_stranger
-- state_machine.owner_greeted -> feedback 欢迎预热（不改状态）
-- camera.frame_ready -> 人脸检测 worker -> owner.classify -> 状态机事件
-- tray.toggle_patrol -> state_machine.on_manual_start/on_manual_stop
-- tray.quit_requested -> app.quit
-"""
+'应用组装与生命周期管理。'
 
 from __future__ import annotations
 
@@ -28,7 +10,7 @@ from dataclasses import replace as dc_replace
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, QThread, QTimer, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QDialog, QLabel
 
 from moeguard.config import (
@@ -43,11 +25,12 @@ from moeguard.pet.feedback import FeedbackController
 from moeguard.pet.frame_animation import FrameAnimationController
 from moeguard.pet.role_assets import (
     RoleInteractionProfile,
+    iter_runtime_role_actions,
     load_runtime_role_actions,
     resolve_role_root,
     validate_runtime_role_root,
 )
-from moeguard.roles import PackageKey, RoleContractError, RoleLibrary
+from moeguard.roles import InstalledRole, PackageKey, RoleContractError, RoleLibrary
 from moeguard.security.camera import CameraCapture
 from moeguard.security.evidence import EvidenceRecorder, EvidenceResult
 from moeguard.security.face import FaceRecognizer
@@ -78,17 +61,13 @@ from moeguard.utils.paths import (
 logger = logging.getLogger(__name__)
 
 class _FaceDetectWorker(QThread):
-    """人脸检测工作线程（PRD §7.2: 摄像头采集与检测严禁主线程）。
+    '人脸检测工作线程。'
 
-    接收摄像头帧，在后台线程执行人脸检测与主人/陌生人分类，
-    通过信号返回结果。
-    """
 
-    # (owner_detected, stranger_detected)
     classify_result = Signal(bool, bool)
-    # 人脸检测/分类异常（M4.5 dogfood 埋点: 识别失败计数）
+
     classify_failed = Signal()
-    motion_detected = Signal(float)  # 相邻帧中发生变化的像素比例
+    motion_detected = Signal(float)
 
     def __init__(self, owner: OwnerProfile, parent=None) -> None:
         super().__init__(parent)
@@ -212,14 +191,13 @@ class MoeGuardApp(QObject):
         self._custom_role_workbench_dialog: QDialog | None = None
         self._role_credit_dialog: QDialog | None = None
         self._mailbox_dialog: QDialog | None = None
-        # v0.4.1：后台信箱检查（由 role_main 注入）与托盘上的未读数
+
         self._mailbox_watcher = None
         self._mailbox_unread = 0
         self._shutdown_started = False
+        self._role_activation_timer: QTimer | None = None
+        self._cancel_role_activation: Callable[[], None] | None = None
 
-    # ------------------------------------------------------------------ #
-    # 属性
-    # ------------------------------------------------------------------ #
 
     @property
     def config(self) -> AppConfig:
@@ -242,7 +220,7 @@ class MoeGuardApp(QObject):
         self,
         factory: Callable[[], QDialog] | None,
     ) -> None:
-        """Inject the v0.2 workbench without coupling the base app to cloud code."""
+        'Inject the workbench without coupling the base app to cloud code.'
         self._custom_role_workbench_factory = factory
         if self._tray is not None:
             self._tray.set_custom_role_workbench_available(factory is not None)
@@ -322,15 +300,7 @@ class MoeGuardApp(QObject):
             logger.debug("更新通知发送失败", exc_info=True)
 
     def notify_workbench_result(self, title: str, message: str) -> None:
-        """Call the user back after a wait they were free to walk away from.
-
-        Both channels are used on purpose and they fail differently: the tray
-        balloon survives the workbench being minimised or buried but is
-        silently dropped by some Windows focus-assist settings, while the pet
-        is already on screen and speaks even when notifications are muted.
-        Neither is allowed to raise -- a refused notification must not turn a
-        finished task into an error.
-        """
+        'Call the user back after a wait they were free to walk away from.'
 
         if self._tray is not None:
             try:
@@ -344,13 +314,10 @@ class MoeGuardApp(QObject):
             except Exception:
                 logger.debug("桌宠气泡提示失败", exc_info=True)
 
-    # ------------------------------------------------------------------ #
-    # 启动
-    # ------------------------------------------------------------------ #
 
     def start(self) -> None:
         """启动应用：加载配置、恢复状态、进入陪伴模式。"""
-        # 1. 加载配置
+
         self._config = AppConfig.load()
         if self._update_controller is not None:
             # Entrypoint configuration precedes start(); reconcile the persisted
@@ -358,10 +325,10 @@ class MoeGuardApp(QObject):
             self._update_controller.set_auto_check_enabled(self._config.updates.auto_check_enabled)
         logger.info("配置加载完成")
 
-        # 2. 确保目录存在
+
         ensure_dirs()
 
-        # 3. 数据库
+
         self._db = Database(DB_PATH)
         self._db.connect()
         logger.info("数据库已连接: %s", DB_PATH)
@@ -369,13 +336,13 @@ class MoeGuardApp(QObject):
         # 4. 加密存储
         self._crypto = CryptoBox(CRYPTO_KEY_PATH)
 
-        # 5. 主人特征存储
+
         self._owner_store = OwnerProfileStore(OWNER_EMBEDDINGS_PATH, self._crypto)
 
-        # 6. 人脸识别器
+
         self._recognizer = FaceRecognizer(config=self._config.security)
 
-        # 7. 主人档案
+
         self._owner = OwnerProfile(self._config.security, self._recognizer)
         owner_embeddings = self._owner_store.load()
         self._owner.load(owner_embeddings)
@@ -387,7 +354,7 @@ class MoeGuardApp(QObject):
         # 8. 摄像头
         self._camera = CameraCapture()
 
-        # 9. 证据录制
+
         self._evidence = EvidenceRecorder(
             evidence_config=self._config.evidence,
             security_config=self._config.security,
@@ -398,10 +365,10 @@ class MoeGuardApp(QObject):
         )
         self._run_evidence_maintenance()
 
-        # 10. 状态机
+
         self._state_machine = StateMachine()
 
-        # 11. 帧动画控制器 + 桌宠窗口
+
         self._frame_controller = FrameAnimationController()
         try:
             role_profile = self._load_pet_frames(self._config.pet)
@@ -426,33 +393,33 @@ class MoeGuardApp(QObject):
             self._persist_config("损坏角色自动回退", notify=False)
         self._pet_window = PetWindow(
             self._frame_controller,
-            fps=self._config.pet.fps,
+            fps=role_profile.fps,
             edge_reveal_fraction=role_profile.edge_reveal_fraction,
         )
         self._pet_window.set_custom_role_workbench_available(
             self._custom_role_workbench_factory is not None
         )
 
-        # 恢复缩放尺寸
+
         if self._config.pet.saved_width != self._config.pet.default_width:
             self._pet_window.resize(
                 self._config.pet.saved_width, self._config.pet.saved_height
             )
 
-        # 缩放持久化回调
+
         self._pet_window.set_scale_persist_callback(self._on_scale_changed)
 
-        # 12. 反馈控制器
+
         self._feedback = FeedbackController(
             self._pet_window,
             self._frame_controller,
             click_lines=role_profile.click_lines,
         )
 
-        # 13. 系统托盘：陪伴与值守状态使用作者定稿的双状态图标。
+
         companion_icon, patrol_icon = application_icons()
         self._tray = TrayIcon(companion_icon, patrol_icon=patrol_icon)
-        self._tray.set_state(False)  # 初始：陪伴模式，"进入值守"可选，"回到陪伴"灰色
+        self._tray.set_state(False)
         self._tray.set_custom_role_workbench_available(
             self._custom_role_workbench_factory is not None
         )
@@ -471,16 +438,16 @@ class MoeGuardApp(QObject):
             self._config.evidence.motion_recording_enabled
         )
 
-        # 16. 接线信号
+
         self._wire_signals()
 
-        # 17. 启动 idle 动画（先让桌宠可见，引导在桌宠之上弹出）
+
         self._feedback.on_companion()
 
-        # 18. 首次启动 -> 只弹一句介绍；值守告知等用户要用值守时再出现
+
         self._maybe_show_first_run()
 
-        # 19. 显示桌宠窗口 + 托盘
+
         self._pet_window.show()
         self._tray.show()
 
@@ -509,7 +476,7 @@ class MoeGuardApp(QObject):
             )
             self._pending_role_notice = None
 
-        # 注册老板键
+
         self._pet_window.register_stealth_hotkey(
             self._config.pet.stealth_hotkey
         )
@@ -571,9 +538,13 @@ class MoeGuardApp(QObject):
 
         logger.info("加载桌宠角色 %s: %s", pet_config.role_id, assets_root)
         candidate = FrameAnimationController()
-        profile = load_runtime_role_actions(candidate, assets_root, fps=pet_config.fps)
+        profile = load_runtime_role_actions(
+            candidate, assets_root, fps=pet_config.fps, fps_override=pet_config.fps_override,
+        )
         if not candidate.has_action("idle"):
             raise RuntimeError(f"角色 idle 帧无法加载: {assets_root}")
+        if self._pet_window is not None:
+            self._pet_window.set_playback_fps(profile.fps)
         fc.replace_actions_from(candidate)
         return profile
 
@@ -638,7 +609,63 @@ class MoeGuardApp(QObject):
         *,
         role_library: RoleLibrary | None = None,
     ) -> tuple[bool, str]:
-        """Atomically activate one already validated managed role version."""
+        """Synchronous compatibility entry; workbench uses the incremental entry."""
+        if self._role_activation_timer is not None:
+            return False, "另一个角色正在准备，请稍候。"
+        steps = self._prepare_managed_role_activation(key, role_library=role_library)
+        while True:
+            try:
+                next(steps)
+            except StopIteration as result:
+                return result.value
+
+    def activate_managed_role_async(
+        self, key: PackageKey, finished: Callable[[bool, str], None], *,
+        role_library: RoleLibrary | None = None, prepared_role: InstalledRole | None = None,
+    ) -> None:
+        """Prepare a worker-verified immutable role without repeating full validation on GUI."""
+        if not isinstance(prepared_role, InstalledRole) or prepared_role.key != key:
+            finished(False, "请先完成角色安装和校验，再启用该版本。")
+            return
+        if self._shutdown_started or self._role_activation_timer is not None:
+            finished(False, "应用正在退出或另一个角色正在准备，请稍候。")
+            return
+        steps = self._prepare_managed_role_activation(
+            key, role_library=role_library, prepared_role=prepared_role,
+        )
+        timer = QTimer(self)
+        self._role_activation_timer = timer
+
+        def complete(success: bool, message: str) -> None:
+            timer.stop()
+            steps.close()
+            self._role_activation_timer = None
+            self._cancel_role_activation = None
+            timer.deleteLater()
+            finished(success, message)
+
+        def advance() -> None:
+            try:
+                next(steps)
+            except StopIteration as result:
+                complete(*result.value)
+            except Exception as exc:
+                logger.exception("角色准备失败: %s", exc)
+                complete(False, str(exc))
+
+        self._cancel_role_activation = lambda: complete(False, "角色准备已取消，当前桌宠未改动。")
+        timer.timeout.connect(advance)
+        timer.start(1)
+
+    def cancel_role_activation(self) -> None:
+        """Discard only the uncommitted candidate, before window teardown."""
+        if self._cancel_role_activation is not None:
+            self._cancel_role_activation()
+
+    def _prepare_managed_role_activation(
+        self, key: PackageKey, *, role_library: RoleLibrary | None = None,
+        prepared_role: InstalledRole | None = None,
+    ):
         assert self._config is not None
         assert self._pet_window is not None
         assert self._feedback is not None
@@ -646,7 +673,7 @@ class MoeGuardApp(QObject):
 
         library = role_library or RoleLibrary()
         try:
-            installed = library.get(key)
+            installed = prepared_role if prepared_role is not None else library.get(key)
         except (OSError, RoleContractError) as exc:
             return False, f"无法读取受管角色包：{exc}"
 
@@ -662,13 +689,25 @@ class MoeGuardApp(QObject):
         )
         try:
             candidate = FrameAnimationController()
-            profile = load_runtime_role_actions(
-                candidate,
-                installed.root,
-                fps=replacement.pet.fps,
+            profile = yield from iter_runtime_role_actions(
+                candidate, installed.root, fps=replacement.pet.fps,
+                fps_override=replacement.pet.fps_override,
             )
             if not candidate.has_action("idle"):
                 raise RuntimeError("受管角色缺少可用的 idle 动作")
+        except Exception as exc:
+            logger.exception("受管角色准备失败 %s: %s", key, exc)
+            return False, str(exc)
+        if self._shutdown_started or self._config is not previous:
+            return False, "准备期间配置已变化，当前桌宠未改动，请重试。"
+        # Retain the exact running frames for rollback, not a second disk decode.
+        old_frames = FrameAnimationController()
+        old_frames._actions = dict(self._frame_controller._actions)
+        old_fps = next((data.fps for data in old_frames._actions.values()), previous.pet.fps)
+        old_reveal = getattr(self._pet_window, "_edge_reveal_fraction", 0.5)
+        old_lines = getattr(self._feedback, "_click_lines", ())
+        try:
+            self._pet_window.set_playback_fps(profile.fps)
             self._frame_controller.replace_actions_from(candidate)
             self._config = replacement
             self._pet_window.set_edge_reveal_fraction(profile.edge_reveal_fraction)
@@ -680,11 +719,10 @@ class MoeGuardApp(QObject):
             logger.exception("受管角色切换失败 %s: %s", key, exc)
             self._config = previous
             try:
-                old_profile = self._load_pet_frames(previous.pet)
-                self._pet_window.set_edge_reveal_fraction(
-                    old_profile.edge_reveal_fraction
-                )
-                self._feedback.set_click_lines(old_profile.click_lines)
+                self._frame_controller.replace_actions_from(old_frames)
+                self._pet_window.set_playback_fps(old_fps)
+                self._pet_window.set_edge_reveal_fraction(old_reveal)
+                self._feedback.set_click_lines(old_lines)
                 self._feedback.restore_animation()
             except Exception:
                 logger.exception("恢复上一个桌宠角色失败")
@@ -705,7 +743,7 @@ class MoeGuardApp(QObject):
         self._lock_monitor.screen_locked.connect(self._on_lock_screen)
         self._lock_monitor.screen_unlocked.connect(self._on_unlock)
 
-        # 状态机 -> 子系统
+
         self._state_machine.patrol_started.connect(self._on_patrol_started)
         self._state_machine.patrol_ended.connect(self._on_patrol_ended)
         self._state_machine.stranger_detected.connect(self._on_stranger_detected)
@@ -724,7 +762,7 @@ class MoeGuardApp(QObject):
         assert self._evidence is not None
         self._evidence.recording_finished.connect(self._on_evidence_recording_finished)
 
-        # 托盘 -> 状态机 / 应用
+
         self._tray.toggle_patrol.connect(self._on_tray_toggle_patrol)
         self._tray.quit_requested.connect(self.quit)
         self._tray.open_settings.connect(self._on_open_settings)
@@ -737,7 +775,7 @@ class MoeGuardApp(QObject):
         self._tray.message_clicked.connect(self._on_tray_message_clicked)
         self._tray.tray_activated.connect(self._on_tray_activated)
 
-        # 桌宠交互 -> 反馈 + dogfood 埋点
+
         self._pet_window.clicked.connect(self._feedback.on_click)
         self._pet_window.clicked.connect(self._on_pet_clicked)
         self._pet_window.drag_started.connect(self._feedback.on_drag_start)
@@ -746,7 +784,7 @@ class MoeGuardApp(QObject):
         self._pet_window.animation_finished.connect(self._on_animation_finished)
         self._pet_window.stealth_toggled.connect(self._on_stealth_toggled)
 
-        # 桌宠右键菜单 -> 应用
+
         self._pet_window.quit_requested.connect(self.quit)
         self._pet_window.settings_requested.connect(self._on_open_settings)
         self._pet_window.custom_role_workbench_requested.connect(
@@ -754,12 +792,9 @@ class MoeGuardApp(QObject):
         )
         self._pet_window.toggle_patrol_requested.connect(self._on_pet_toggle_patrol)
 
-        # 反馈消息 -> 桌宠气泡
+
         self._feedback.message.connect(self._pet_window.show_message)
 
-    # ------------------------------------------------------------------ #
-    # 信号处理
-    # ------------------------------------------------------------------ #
 
     def _on_lock_screen(self) -> None:
         """锁屏事件 -> 进入值守。"""
@@ -866,7 +901,7 @@ class MoeGuardApp(QObject):
         had_incidents = self._state_machine.incident_count > 0
         self._feedback.greet_return(had_incidents)
 
-        # 记录值守会话
+
         end_ts = time.time()
         self._db.log_patrol_session(
             start_ts=self._patrol_start_time,
@@ -874,7 +909,7 @@ class MoeGuardApp(QObject):
             incident_count=self._state_machine.incident_count,
             trigger=self._patrol_trigger or "manual",
         )
-        # dogfood 埋点：值守时长
+
         self._db.bump_usage(
             self._today(),
             patrol_seconds=end_ts - self._patrol_start_time,
@@ -1105,9 +1140,6 @@ class MoeGuardApp(QObject):
         if action_name in ("click_reaction", "dragging", "welcome", "notice"):
             self._feedback.restore_animation()
 
-    # ------------------------------------------------------------------ #
-    # dogfood 埋点 handlers
-    # ------------------------------------------------------------------ #
 
     @staticmethod
     def _today() -> str:
@@ -1209,7 +1241,7 @@ class MoeGuardApp(QObject):
                 dialog.deleteLater()
                 return
             self._persist_config("设置修改")
-            # 老板键变更后立即重新注册
+
             if "stealth_hotkey" in vals:
                 assert self._pet_window is not None
                 self._pet_window.register_stealth_hotkey(vals["stealth_hotkey"])
@@ -1222,14 +1254,7 @@ class MoeGuardApp(QObject):
         dialog.activateWindow()
 
     def _reconcile_missing_managed_role(self) -> None:
-        """Replace a vanished managed-role binding with the actual Lumen fallback.
-
-        A role directory can disappear after startup because of manual cleanup
-        or an interrupted external copy. The already decoded frames can keep
-        rendering, while a newly opened settings dialog sees only a stale
-        ``role_id@version``. Normalize both runtime and persisted configuration
-        before constructing that dialog.
-        """
+        'Replace a vanished managed-role binding with the actual Lumen fallback.'
         assert self._config is not None
         pet = self._config.pet
         if pet.role_package_version <= 0:
@@ -1265,6 +1290,9 @@ class MoeGuardApp(QObject):
         if factory is None:
             return
         if self._custom_role_workbench_dialog is not None:
+            self._custom_role_workbench_dialog.setWindowState(
+                self._custom_role_workbench_dialog.windowState() & ~Qt.WindowMinimized
+            )
             self._custom_role_workbench_dialog.show()
             self._custom_role_workbench_dialog.raise_()
             self._custom_role_workbench_dialog.activateWindow()
@@ -1438,6 +1466,7 @@ class MoeGuardApp(QObject):
                 role_id=vals["role_id"],
                 role_package_version=vals["role_package_version"],
                 assets_dir=vals["assets_dir"],
+                fps_overrides=dict(vals.get("fps_overrides", self._config.pet.fps_overrides)),
                 stealth_hotkey=vals["stealth_hotkey"],
             ),
         )
@@ -1446,7 +1475,10 @@ class MoeGuardApp(QObject):
             vals["role_package_version"],
             vals["assets_dir"],
         )
-        if new_role_source != old_role_source:
+        if (
+            new_role_source != old_role_source
+            or candidate_config.pet.fps_override != previous_config.pet.fps_override
+        ):
             profile = self._load_pet_frames(candidate_config.pet)
             assert self._pet_window is not None
             self._pet_window.set_edge_reveal_fraction(profile.edge_reveal_fraction)
@@ -1580,7 +1612,7 @@ class MoeGuardApp(QObject):
         左键单击或双击 -> 切换桌宠可见性。
         """
         logger.info("托盘激活: reason=%d", reason)
-        # DoubleClick=2：仅左键双击切换，防止单击误触
+
         if reason == 2:
             self._toggle_pet_visibility()
 
@@ -1642,9 +1674,6 @@ class MoeGuardApp(QObject):
         )
         self._persist_config("桌宠尺寸")
 
-    # ------------------------------------------------------------------ #
-    # 陪伴模式
-    # ------------------------------------------------------------------ #
 
     def _enter_companion_mode(self) -> None:
         """进入陪伴模式。"""
@@ -1652,9 +1681,6 @@ class MoeGuardApp(QObject):
         self._feedback.on_companion()
         logger.info("进入陪伴模式")
 
-    # ------------------------------------------------------------------ #
-    # 引导
-    # ------------------------------------------------------------------ #
 
     def _maybe_show_first_run(self) -> None:
         """首次启动只弹一次介绍气泡（与值守同意分开记录）。"""
@@ -1683,7 +1709,7 @@ class MoeGuardApp(QObject):
             if current.mode == mode:
                 current.raise_()
                 return
-            # 值守设置优先：关掉还开着的首次介绍（记为 closed）
+
             current.close()
 
         start_step = 2 if mode == "patrol" and self._has_patrol_consent() else 1
@@ -1750,14 +1776,14 @@ class MoeGuardApp(QObject):
         if not self._camera.is_opened():
             self._camera.start(
                 device_index=self._config.camera.device_index,
-                interval_ms=200,  # 预览用高频采样
+                interval_ms=200,
             )
 
-        # 定时器持续刷新预览
+
         from PySide6.QtCore import QTimer
         self._preview_timer = QTimer(self)
         self._preview_timer.timeout.connect(self._tick_preview)
-        self._preview_timer.start(100)  # 每 100ms 刷新预览
+        self._preview_timer.start(100)
 
     def _tick_preview(self) -> None:
         """定时刷新摄像头预览帧。"""
@@ -1781,14 +1807,14 @@ class MoeGuardApp(QObject):
                 self._onboarding.registration_result(False, "摄像头不可用，请检查后重试。")
             return
 
-        # 更新预览显示拍到的照片
+
         self._update_onboarding_preview(frame)
 
         # 在后台线程注册人脸，避免阻塞 UI
         worker = _OwnerRegisterWorker(self._owner, frame)
         worker.finished.connect(self._on_owner_register_done)
         worker.start()
-        # 保存引用防止被 GC
+
         self._register_worker = worker
 
     def _on_owner_register_done(self, success: bool) -> None:
@@ -1802,7 +1828,7 @@ class MoeGuardApp(QObject):
         assert self._owner is not None
         assert self._owner_store is not None
         try:
-            # 完成页只能在 worker 成功且本地持久化成功后显示。
+
             self._owner_store.save(self._owner.embeddings())
         except Exception as exc:
             logger.exception("主人特征保存失败: %s", exc)
@@ -1825,7 +1851,7 @@ class MoeGuardApp(QObject):
             import cv2
             from PySide6.QtGui import QImage, QPixmap
 
-            # BGR -> RGB
+
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             h, w, ch = rgb.shape
             bytes_per_line = ch * w
@@ -1881,15 +1907,13 @@ class MoeGuardApp(QObject):
         self._persist_config("拒绝值守同意")
         logger.info("用户拒绝值守同意，保持纯桌宠模式")
 
-    # ------------------------------------------------------------------ #
-    # 退出
-    # ------------------------------------------------------------------ #
 
     def shutdown(self) -> None:
         """Release native and background resources before QApplication teardown."""
         if self._shutdown_started:
             return
         self._shutdown_started = True
+        self.cancel_role_activation()
         logger.info("正在退出萌卫...")
 
         for dialog in (
@@ -1930,11 +1954,11 @@ class MoeGuardApp(QObject):
         if self._lock_monitor is not None:
             self._lock_monitor.stop()
 
-        # 注销全局热键
+
         if self._pet_window is not None:
             self._pet_window.unregister_stealth_hotkey()
 
-        # 停止帧动画
+
         if self._frame_controller is not None:
             self._frame_controller.stop()
 
@@ -1973,11 +1997,11 @@ class MoeGuardApp(QObject):
                 widget.hide()
                 widget.deleteLater()
 
-        # 保存配置
+
         if self._config is not None:
             self._persist_config("退出前保存", notify=False)
 
-        # 关闭数据库
+
         if self._db is not None:
             self._db.close()
 
@@ -1994,7 +2018,7 @@ class MoeGuardApp(QObject):
         """Gracefully release resources, then leave the Qt event loop."""
         self.shutdown()
 
-        # 退出应用
+
         app = QApplication.instance()
         if app is not None:
             app.quit()
@@ -2026,7 +2050,7 @@ def run(
         app.setApplicationDisplayName("萌卫")
         companion_icon, _patrol_icon = application_icons()
         app.setWindowIcon(companion_icon)
-        # 桌宠/托盘应用：关闭窗口不应退出进程
+
         app.setQuitOnLastWindowClosed(False)
 
         moeguard = MoeGuardApp()

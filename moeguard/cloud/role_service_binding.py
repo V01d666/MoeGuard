@@ -193,8 +193,8 @@ class RoleServiceBindingManager:
         self._process_lock_path = enrollment_store.path.with_name(
             enrollment_store.path.name + ".lock"
         )
-        # Written by v0.3.0's "disconnect" button, which v0.4.0 removed.  A
-        # stale marker must not keep a user offline, so it is only cleared.
+
+
         self._legacy_disconnect_marker = session_store.path.with_name(
             "automatic-connection-disabled"
         )
@@ -206,10 +206,7 @@ class RoleServiceBindingManager:
         return session
 
     def bind(self, service_origin: str) -> RoleServiceSession:
-        """Return a usable session, enrolling only when none is stored.
-
-        A stored, unexpired session costs no network request.
-        """
+        'Return a usable session, enrolling only when none is stored.'
         with self._binding_lock, FileLock(self._process_lock_path):
             return self._bind_and_clear_marker(service_origin)
 
@@ -233,7 +230,7 @@ class RoleServiceBindingManager:
                 stored = None
             if stored is not None and stored.bearer_token != rejected_token:
                 return stored
-            # Secure the identity before dropping the session that carries it.
+
             self._recovery_identity(https_role_service_origin(service_origin))
             self.session_store.delete()
             return self._bind_and_clear_marker(service_origin)
@@ -298,15 +295,7 @@ def _is_rejected_token(error: Exception) -> bool:
 
 
 class SessionTransport:
-    """The role-service transport for this device, connecting on demand.
-
-    Every call obtains the device session first (no network while a stored
-    session is valid) and, if the service rejects the token, renews it once
-    with the same identity and repeats the call.  Authentication is checked
-    before any request is processed, so the repeat cannot double a side
-    effect.  This is what lets the workshop generate without a separate
-    "connect" step and survive a token expiring while the app is open.
-    """
+    'The role-service transport for this device, connecting on demand.'
 
     def __init__(
         self,

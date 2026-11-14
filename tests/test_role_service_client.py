@@ -142,9 +142,8 @@ def test_preview_tracks_public_service_origin_and_role_enabled_entrypoints() -> 
     assert 'moeguard = "moeguard.role_main:main"' in (root / "pyproject.toml").read_text(
         encoding="utf-8"
     )
-    assert "python -m moeguard.role_main" in (root / "start_moeguard.bat").read_text(
-        encoding="utf-8"
-    )
+    launcher = root / "scripts/windows/start_moeguard.bat"
+    assert "python -m moeguard.role_main" in launcher.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -367,15 +366,15 @@ def test_public_client_rejects_invalid_event_receipts(monkeypatch, response: dic
         ),
         (
             RoleServiceHttpError(429, "rate_limited", "private server detail"),
-            "操作过于频繁",
+            "服务暂时不可用",
         ),
         (
             RoleServiceHttpError(401, "invalid_enrollment", "private server detail"),
             "绑定信息已失效",
         ),
         (
-            RoleServiceHttpError(429, "enrollment_rate_limited", "private server detail"),
-            "绑定请求较多",
+            RoleServiceHttpError(503, "service_unavailable", "private server detail"),
+            "服务暂时不可用",
         ),
         (
             RoleServiceHttpError(409, "credit_code_unavailable", "private server detail"),
@@ -411,6 +410,21 @@ def test_public_role_service_errors_have_stable_user_copy(error: Exception, expe
     assert "provider_technical_failure" not in message
     assert "T2I" not in message
     assert "I2V" not in message
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_http_transient_exception_contains_only_generic_failure(status):
+    error = RoleServiceHttpError(status, "backend_private_detail", "private detail")
+    assert (error.status, error.code) == (503, "service_unavailable")
+    assert error.message == "role service temporarily unavailable"
+    assert "private" not in str(error)
+    assert role_service_user_message(error) == "服务暂时不可用，请稍后再试。"
+
+
+def test_unknown_http_reason_does_not_enter_client_diagnostics():
+    error = RoleServiceHttpError(422, "backend_private_detail", "private implementation")
+    assert error.code == "request_rejected"
+    assert "private" not in str(error)
 
 
 @pytest.mark.parametrize(
@@ -692,14 +706,7 @@ def test_candidate_image_rejects_decompression_scale_dimensions(tmp_path: Path) 
 
 
 def test_an_unknown_snapshot_field_does_not_break_an_older_client() -> None:
-    """A task snapshot must tolerate fields a client does not know yet.
-
-    The parser compared the key set for exact equality, so adding any field
-    server-side turned every poll into a hard failure rather than something a
-    client could ignore. That makes the protocol impossible to extend without
-    replacing every client at once, and it fails in the worst place: mid-wait,
-    on a task that is running and being billed.
-    """
+    'A task snapshot must tolerate fields a client does not know yet.'
 
     from moeguard.cloud.role_service_http_client import _snapshot_from_dict
 
@@ -731,7 +738,7 @@ def test_a_missing_required_snapshot_field_is_still_refused() -> None:
                 "remote_task_id": "role-" + "a" * 40,
                 "spec_sha256": "b" * 64,
                 "status": "running",
-                # progress missing
+
                 "retryable": False,
                 "error_code": "",
                 "result_sha256": "",

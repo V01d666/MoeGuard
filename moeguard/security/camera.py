@@ -1,11 +1,4 @@
-"""摄像头采集（线程安全常驻架构）。
-
-PRD §7.2: 摄像头常驻模式，严禁每帧 open/close（M0-2 根因，导致 0.5fps）。
-start 时 open，stop 时 release，期间 VideoCapture 常驻。
-grab() 用于证据截图，与 QTimer 采集共享同一 VideoCapture，通过锁互斥。
-
-摄像头只由后台采集线程读取；GUI 线程只接收 ``frame_ready`` 信号。
-"""
+'常驻后台采集；同一VideoCapture的读取和释放由锁与采集代次隔离。'
 
 from __future__ import annotations
 
@@ -28,10 +21,10 @@ class CameraCapture(QObject):
     最新帧副本，因此不会和周期检测并发读同一个设备。
     """
 
-    frame_ready = Signal(object)  # np.ndarray (BGR)
+    frame_ready = Signal(object)
     camera_ready = Signal()  # 已收到首帧，摄像头实际可用
     camera_failed = Signal(str)  # 摄像头中断或连续读取失败
-    capture_gap_detected = Signal(float)  # 恢复后检测到的采集时间线空洞（秒）
+    capture_gap_detected = Signal(float)
 
     def __init__(self) -> None:
         super().__init__()
@@ -171,7 +164,7 @@ class CameraCapture(QObject):
         last_success = 0.0
         failures = 0
         ready_emitted = False
-        # 证据录制需要较新帧；检测仍保持调用方设定的频率。
+
         read_interval = min(interval_sec, 0.1)
 
         try:

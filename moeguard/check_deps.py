@@ -21,7 +21,7 @@ _REQUIRED: list[tuple[str, str, str]] = [
     ("numpy", "numpy", "__version__"),
     ("cryptography", "cryptography", "__version__"),
     ("PIL", "pillow", "__version__"),
-    ("tomli_w", "tomli_w", "NOT_A_REAL_ATTR"),  # no standard version attr; _get_version falls back
+    ("tomli_w", "tomli_w", "NOT_A_REAL_ATTR"),
 ]
 
 def _get_version(mod, attr: str) -> str:
@@ -29,7 +29,7 @@ def _get_version(mod, attr: str) -> str:
     try:
         return str(getattr(mod, attr))
     except AttributeError:
-        # 部分包用 version() 函数或 __version_info__ 元组
+
         for candidate in ("__version_info__", "VERSION", "version"):
             try:
                 val = getattr(mod, candidate)

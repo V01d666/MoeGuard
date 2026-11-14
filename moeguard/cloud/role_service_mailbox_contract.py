@@ -1,18 +1,8 @@
 """Mailbox wire contract shared by the client and the role service.
 
-The mailbox is the only channel between the maintainer and fully anonymous
-users: a user can leave a plain-text message, the maintainer can reply, and
-announcements can target client versions.  Everything here is pure validation
-so both sides enforce the same limits.
-
-Two directions, two parsing rules:
-
-* **Requests are strict.**  The service rejects unknown keys, because the
-  diagnostics block is a privacy gate and must never grow a free-form field.
-  The service is always deployed before any client that sends a new key.
-* **Responses are read by required subset.**  A client accepts any response
-  that carries every field it needs and ignores the rest, so the service can
-  add fields later without breaking installed clients.
+Requests reject unknown keys to keep diagnostics bounded; deploy the service
+before a client sends new fields. Responses accept required fields as a subset
+and ignore additional fields for installed-client compatibility.
 """
 
 from __future__ import annotations
@@ -28,8 +18,6 @@ MAX_REPLY_CHARS = 1000
 MAX_ANNOUNCEMENT_TITLE_CHARS = 40
 MAX_ANNOUNCEMENT_BODY_CHARS = 1000
 DAILY_MESSAGE_LIMIT = 5
-GLOBAL_DAILY_MESSAGE_LIMIT = 300
-MESSAGE_WINDOW_SECONDS = 24 * 60 * 60
 MESSAGE_LIST_LIMIT = 50
 ANNOUNCEMENT_LIST_LIMIT = 20
 MAX_MAILBOX_REQUEST_BYTES = 16 * 1024
@@ -46,8 +34,8 @@ _SEMVER_RE = re.compile(
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 _SERIES_RE = re.compile(r"^(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*))?\.x$")
-# Direction overrides can make a message render differently from its bytes in
-# the operator's terminal; nothing a user writes needs them.
+
+
 _BIDI_CONTROLS = frozenset(
     chr(value) for value in (*range(0x202A, 0x202F), *range(0x2066, 0x206A))
 )
@@ -174,9 +162,6 @@ class MailboxMessageRequest:
         return payload
 
 
-# -- versions ---------------------------------------------------------------
-
-
 def parse_version(value: str) -> tuple[Any, ...] | None:
     """Return a SemVer 2.0 precedence key, or None when the text is not SemVer."""
 
@@ -186,7 +171,7 @@ def parse_version(value: str) -> tuple[Any, ...] | None:
     major, minor, patch, prerelease = match.groups()
     core = (int(major), int(minor), int(patch))
     if prerelease is None:
-        # A release outranks every pre-release of the same core version.
+
         return (*core, 1, ())
     identifiers = tuple(
         (0, int(part), "") if part.isdigit() else (1, 0, part)

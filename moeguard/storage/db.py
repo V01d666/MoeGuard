@@ -1,13 +1,4 @@
-"""本地 SQLite 数据库。
-
-存储安防事件记录（时间、类型、证据路径）等结构化数据。
-人脸特征等高敏感数据走 OwnerProfileStore 加密存储，不放此处。
-
-表结构：
-- incidents:       陌生人事件记录（时间、类型、证据、摘要）
-- patrol_sessions: 值守会话记录（开始/结束、事件数、触发方式）
-- usage_daily:     M4.5 dogfood 日级使用统计（本地离线，零网络上报）
-"""
+'本地 SQLite 数据库。'
 
 from __future__ import annotations
 
@@ -138,9 +129,7 @@ class Database:
         assert self._conn is not None
         return int(self._conn.execute("PRAGMA user_version").fetchone()[0])
 
-    # ------------------------------------------------------------------
-    # incidents 表操作
-    # ------------------------------------------------------------------
+
     def log_incident_atomic(
         self,
         ts: float,
@@ -360,9 +349,7 @@ class Database:
         )
         return cur.fetchall()
 
-    # ------------------------------------------------------------------
-    # patrol_sessions 表操作
-    # ------------------------------------------------------------------
+
     def log_patrol_session(
         self,
         start_ts: float,
@@ -400,9 +387,7 @@ class Database:
         )
         return cur.fetchall()
 
-    # ------------------------------------------------------------------
-    # usage_daily 表操作（M4.5 dogfood 埋点）
-    # ------------------------------------------------------------------
+
     def bump_usage(
         self,
         date: str,

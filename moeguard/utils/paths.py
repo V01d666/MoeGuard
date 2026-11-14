@@ -1,8 +1,4 @@
-"""统一数据路径管理。
-
-所有用户数据存 ~/.moeguard/，严禁写程序运行目录（PRD §7.2）。
-子目录：owner/ · evidence/ · models/ · logs/ · config.toml · moeguard.db
-"""
+'统一数据路径管理。'
 
 from __future__ import annotations
 
@@ -12,10 +8,9 @@ import uuid
 from functools import cache
 from pathlib import Path
 
-# 基础目录
 _BASE_DIR = Path.home() / ".moeguard"
 
-# 各子目录/文件路径
+
 CONFIG_PATH = _BASE_DIR / "config.toml"
 DB_PATH = _BASE_DIR / "moeguard.db"
 LOG_DIR = _BASE_DIR / "logs"
@@ -24,10 +19,10 @@ OWNER_DIR = _BASE_DIR / "owner"          # 主人特征加密存储
 OWNER_EMBEDDINGS_PATH = OWNER_DIR / "owner_embeddings.enc"
 CRYPTO_KEY_PATH = OWNER_DIR / ".crypto_key"
 
-EVIDENCE_DIR = _BASE_DIR / "evidence"    # 用户可见路径（D20）
-MODELS_DIR = _BASE_DIR / "models"        # ONNX 模型缓存
-ROLES_DIR = _BASE_DIR / "roles"          # 受管自定义角色库
-ROLE_WORKBENCH_DIR = _BASE_DIR / "role-workbench"  # 可恢复形象档案与草稿
+EVIDENCE_DIR = _BASE_DIR / "evidence"
+MODELS_DIR = _BASE_DIR / "models"
+ROLES_DIR = _BASE_DIR / "roles"
+ROLE_WORKBENCH_DIR = _BASE_DIR / "role-workbench"
 
 # 随包模型的 SHA-256。内部 RC 与源码运行均通过同一份资源校验，防止
 # 损坏或被替换的模型在无感知情况下参与人脸判定。
@@ -108,7 +103,7 @@ def quarantine_model_file(path: Path) -> Path | None:
 
 
 def evidence_dir() -> Path:
-    """证据目录（用户可见，D20）。"""
+    '证据目录。'
     return EVIDENCE_DIR
 
 

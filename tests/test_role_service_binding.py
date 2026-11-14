@@ -105,6 +105,46 @@ def test_binding_persists_identity_before_network_and_reuses_it_after_failure(
     assert manager.current_session() == session
 
 
+def test_temporary_service_failure_keeps_identity_and_does_not_rebind_or_resubmit(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from moeguard.cloud.role_service_binding import SessionTransport
+    from moeguard.cloud.role_service_http_client import RoleServiceHttpError
+    from moeguard.cloud.role_service_session import RoleServiceSession
+
+    enrollments = []
+    queries = []
+    blocked = [True]
+
+    def enroll(*args):
+        enrollments.append(args)
+        return _enrollment()
+
+    class Transport:
+        def query(self, task):
+            queries.append(task)
+            if blocked[0]:
+                raise RoleServiceHttpError(503, "service_unavailable", "temporary failure")
+            return task
+
+        def submit(self, *args, **kwargs):
+            pytest.fail("an existing task must not be resubmitted")
+
+    manager, identities, sessions = _manager(tmp_path, enroll)
+    manager.bind("https://roles.example")
+    before = (identities.path.read_bytes(), sessions.path.read_bytes())
+    monkeypatch.setattr(RoleServiceSession, "transport", lambda *args, **kwargs: Transport())
+    transport = SessionTransport(manager, "https://roles.example")
+    with pytest.raises(RoleServiceHttpError):
+        transport.query("existing-task")
+    assert queries == ["existing-task"]
+    assert len(enrollments) == 1
+    assert (identities.path.read_bytes(), sessions.path.read_bytes()) == before
+    blocked[0] = False
+    assert transport.query("existing-task") == "existing-task"
+    assert len(enrollments) == 1
+
+
 def test_binding_reuses_active_session_without_network(tmp_path: Path) -> None:
     calls = 0
 
@@ -159,7 +199,7 @@ def test_lost_enrollment_file_is_recovered_from_the_session(tmp_path: Path) -> N
     enrollment_store.delete()
     manager.renew("https://roles.example", first.bearer_token)
 
-    assert calls[0] == calls[1]  # Same identity, so the same support ID.
+    assert calls[0] == calls[1]
     assert enrollment_store.load() is not None
 
 

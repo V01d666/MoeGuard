@@ -21,8 +21,8 @@ _STAGES = frozenset(
     {"role_library", "create_identity", "select_animate", "preview_install", "recovery"}
 )
 _ENTRYPOINTS = frozenset(
-    # v0.4.1+: pet_menu = the pet's right-click menu; notification = a tray
-    # balloon the user clicked.
+
+
     {"settings", "tray", "startup", "workbench", "recovery", "pet_menu", "notification"}
 )
 _OPERATIONS = frozenset(
@@ -55,17 +55,17 @@ _CLIENT_ERROR_CODES = frozenset(
         "provider_technical_failure",
         "task_failed",
         "task_not_found",
-        # v0.4.0+: split out of request_rejected so "no credits left" is
-        # countable from telemetry alone.
+
+
         "insufficient_units",
     }
 )
-# v0.4.0+: how the running copy was installed, and what is on the desktop.
+
 _INSTALL_KINDS = frozenset({"installed", "portable", "source", "unknown"})
 _ROLE_KINDS = frozenset({"builtin", "custom", "none"})
-# v0.4.0+: which request family a latency sample belongs to.
+
 _LATENCY_ROUTES = frozenset({"account", "tasks", "assets", "results", "events", "updates"})
-# v0.4.1+: what the user chose in the first-run bubble and in the guard setup.
+
 _ONBOARDING_OUTCOMES = frozenset({"acknowledged", "closed"})
 _PATROL_SETUP_OUTCOMES = frozenset({"declined", "owner_skipped", "owner_registered", "closed"})
 # Server-generated announcement IDs (RoleServiceState.publish_announcement):
@@ -80,15 +80,15 @@ _PROPERTY_LIMITS = {
     "retry_count": (0, 1000),
     "bytes_received": (0, 512 * 1024 * 1024),
     "display_scale_percent": (50, 400),
-    # v0.4.0+ daily heartbeat and latency samples.  Bounds are generous but
-    # finite so a corrupt client can never write an unbounded integer.
+
+
     "custom_role_count": (0, 1000),
     "uptime_minutes": (0, 7 * 24 * 60),
     "sample_count": (1, 10_000),
     "failure_count": (0, 10_000),
     "latency_p50_ms": (0, 600_000),
     "latency_p90_ms": (0, 600_000),
-    # v0.4.1+ unread items when the mailbox was opened.
+
     "unread_count": (0, 1000),
 }
 
@@ -165,8 +165,8 @@ _EVENT_RULES = {
     "client_error_shown": _rule(
         "reason", "error_code", "retry_count", required=("error_code",)
     ),
-    # -- v0.4.0+ (server accepts first; v0.3.x clients never send these) ------
-    # At most one per local day: answers "is the pet still on the desktop".
+
+
     "daily_active": _rule(
         *_RUNTIME_CONTEXT,
         "install_kind",
@@ -175,10 +175,10 @@ _EVENT_RULES = {
         "uptime_minutes",
         required=("install_kind", "active_role_kind"),
     ),
-    # A preview was closed without installing: the silent drop-off.
+
     "preview_dismissed": _rule("duration_ms", "package_ready"),
-    # Aggregated client-measured latency per request family since the last
-    # sample, to compare carriers and regions.
+
+
     "network_sample": _rule(
         "latency_route",
         "sample_count",
@@ -187,16 +187,16 @@ _EVENT_RULES = {
         "latency_p90_ms",
         required=("latency_route", "sample_count", "latency_p50_ms"),
     ),
-    # -- v0.4.1+ (server accepts first) ---------------------------------------
-    # The first-run bubble was acknowledged or closed.
+
+
     "onboarding_finished": _rule("onboarding_outcome", required=("onboarding_outcome",)),
-    # How the guard setup (risk notice + owner registration) ended.
+
     "patrol_setup_finished": _rule(
         "patrol_setup_outcome", required=("patrol_setup_outcome",)
     ),
     "mailbox_opened": _rule("unread_count"),
-    # Delivery receipt: the client fetched a new announcement and showed the
-    # notice.  Read receipt: the user opened it in the mailbox.
+
+
     "announcement_received": _rule("announcement_id", required=("announcement_id",)),
     "announcement_viewed": _rule("announcement_id", required=("announcement_id",)),
 }

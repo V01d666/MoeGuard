@@ -23,6 +23,28 @@ _REVIEW_STATUSES = {"pending", "accepted", "rejected"}
 _DIRECTIONAL_ACTIONS = {"peek_left": "left", "peek_right": "right"}
 
 
+def write_action_preview(frames: tuple[Path, ...], destination: Path) -> None:
+    images = []
+    for frame in frames:
+        with Image.open(frame) as source:
+            rgba = source.convert("RGBA")
+        opaque = rgba.getchannel("A").point(lambda value: 255 if value >= 128 else 0)
+        rgb = Image.new("RGB", rgba.size)
+        rgb.paste(rgba, mask=opaque)
+        indexed = rgb.quantize(
+            colors=255, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE
+        )
+        indexed.paste(255, mask=opaque.point(lambda value: 255 - value))
+        indexed.info["transparency"] = 255
+        images.append(indexed)
+    if images:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        images[0].save(
+            destination, save_all=True, append_images=images[1:], duration=167,
+            loop=0, disposal=2, transparency=255, background=255, optimize=False,
+        )
+
+
 def _invalid(message: str, path: str) -> None:
     raise RoleContractError(ContractErrorCode.INVALID_VALUE, message, path=path)
 

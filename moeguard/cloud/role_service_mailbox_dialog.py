@@ -65,7 +65,7 @@ class _MailJob(QObject):
             try:
                 self.done.emit(result)
             except RuntimeError:
-                # The window/application may have closed during an HTTP call.
+
                 pass
 
         threading.Thread(target=run, name="moeguard-mailbox", daemon=True).start()
@@ -143,7 +143,7 @@ class MailboxDialog(QDialog):
         self.mark_all_button.clicked.connect(self._mark_all)
         read_bar.addWidget(self.mark_all_button)
         read_bar.addStretch(1)
-        # Rarely needed (privacy clean-up / recovery): right-aligned and quiet.
+
         self.clear_read_button = QPushButton("清除已读记录")
         self.clear_read_button.setFlat(True)
         self.clear_read_button.setStyleSheet(
@@ -175,7 +175,7 @@ class MailboxDialog(QDialog):
         )
         send_bar.addWidget(self.attach_diagnostics)
         send_bar.addStretch(1)
-        # The count belongs to the text and the send button, not the checkbox.
+
         self.counter = QLabel("0 / 500")
         send_bar.addWidget(self.counter)
         self.send_button = QPushButton("预览并发送")
@@ -320,7 +320,7 @@ class MailboxDialog(QDialog):
                 title, _body, direction = self._rows[key]
                 unread = direction == "incoming" and key not in self._seen
                 count += int(unread)
-                # Unread is shown by weight, not by a text prefix.
+
                 font = row.font()
                 font.setBold(unread)
                 row.setFont(font)
@@ -455,16 +455,10 @@ class MailboxDialog(QDialog):
 
 
 class MailboxWatcher(QObject):
-    """Background check for unread announcements and author replies (v0.4.1).
-
-    Runs at startup and every ``period_ms``; reads only the local read store
-    and never marks anything read.  ``new_mail`` fires once per item, using a
-    second marker store, so the tray notice is not repeated on every check.
-    Failures are silent: the mailbox itself still works when opened.
-    """
+    'Background check for unread announcements and author replies ().'
 
     unread_changed = Signal(int)
-    new_mail = Signal(object)  # tuple[UnreadMail, ...]
+    new_mail = Signal(object)
 
     def __init__(
         self,
@@ -580,5 +574,5 @@ class MailboxWatcher(QObject):
         try:
             self._notified_store.mark_read(item.key for item in fresh)
         except (OSError, ValueError):
-            pass  # worst case the notice repeats at the next check
+            pass
         self.new_mail.emit(fresh)

@@ -1,10 +1,4 @@
-"""Provider-neutral client/service seam for recoverable custom-role tasks.
-
-The production transport will eventually speak HTTPS.  This module freezes
-the client semantics first: one local task binds to one opaque service task,
-polling never resubmits, and a completed result is published locally before
-the local journal accepts completion.
-"""
+"""Recoverable client task contracts and local task handling."""
 
 from __future__ import annotations
 
@@ -222,20 +216,12 @@ def sanitize_role_service_result(source: Path, destination: Path) -> None:
                     target_frame.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source_frame, target_frame)
             verify_role_directory(target_root)
-            previews = target_root / "previews"
-            previews.mkdir()
+            from moeguard.roles.editor import write_action_preview
+
             for action, definition in package.actions:
-                images = []
-                for frame in definition.frames:
-                    with Image.open(target_root / Path(frame.path)) as image:
-                        images.append(image.convert("RGBA"))
-                images[0].save(
-                    previews / f"{action}.gif",
-                    save_all=True,
-                    append_images=images[1:],
-                    duration=167,
-                    loop=0,
-                    disposal=2,
+                write_action_preview(
+                    tuple(target_root / frame.path for frame in definition.frames),
+                    target_root / "previews" / f"{action}.gif",
                 )
             metadata = {
                 "schema_version": 1,
@@ -296,7 +282,7 @@ class ServiceAssetRef:
 
     @classmethod
     def from_dict(cls, raw: Any, *, allow_extra_fields: bool = False) -> ServiceAssetRef:
-        # Responses can grow; incoming requests and local contracts stay strict.
+
         required = {
             "sha256",
             "media_type",
@@ -747,12 +733,7 @@ class RoleServiceClient:
         )
         self.result_event_callback = result_event_callback
         self.last_estimated_seconds = 0
-        """What the service last said a comparable task usually costs.
-
-        Advisory and transient: it reflects recent behaviour at the moment of
-        the last poll, so it is never written to the task journal where it
-        would age into a stale promise.
-        """
+        'What the service last said a comparable task usually costs.'
 
     def _notify_result_event(
         self, event_name: str, local_task_id: str, remote_task_id: str
@@ -843,9 +824,8 @@ class RoleServiceClient:
     ) -> RoleTaskRecord:
         snapshot = self.ensure_submitted(local_task_id, request)
         record = self.task_store.load(local_task_id)
-        # Advisory only, and deliberately not persisted: it describes what
-        # comparable tasks cost right now, so a value stored against this task
-        # would age into a claim the service no longer stands behind.
+
+
         self.last_estimated_seconds = snapshot.estimated_seconds
         if snapshot.status in {"queued", "running", "cancel_requested"}:
             if record.status == "running":

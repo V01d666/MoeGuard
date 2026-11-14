@@ -1,10 +1,4 @@
-"""Public-safe HTTPS client transport for the custom-role service.
-
-This module intentionally contains no HTTP listener, worker, provider, credit,
-or commerce implementation.  It is suitable for inclusion in the open-source
-v0.2 client while the service-side application remains private operational
-code.
-"""
+'Public-safe HTTPS client transport for the custom-role service.'
 
 from __future__ import annotations
 
@@ -131,6 +125,20 @@ class RoleServiceHttpError(RuntimeError):
     """Stable HTTP failure exposed to the desktop client."""
 
     def __init__(self, status: int, code: str, message: str) -> None:
+        if status == 429 or status >= 500:
+            status, code, message = (
+                503, "service_unavailable", "role service temporarily unavailable"
+            )
+        else:
+            if code not in {
+                "invalid_token", "invalid_enrollment", "insufficient_units",
+                "insufficient_t2i_units", "insufficient_i2v_units", "invalid_credit_code",
+                "credit_code_unavailable", "credit_campaign_limit_reached", "task_not_found",
+                "asset_not_found", "provider_submission_uncertain", "idempotency_conflict",
+                "asset_metadata_conflict",
+            }:
+                code = "request_rejected"
+            message = "role service request failed"
         self.status = status
         self.code = code
         self.message = message
@@ -160,10 +168,6 @@ def _urlopen_no_redirect(request: urllib.request.Request, *, timeout: float):
     )
 
 
-# -- request latency (v0.4.0 ``network_sample``) -----------------------------
-#
-# Transports are short-lived (one per call), so the observer is process-wide.
-# It receives only a route family, a duration and whether the link worked.
 RequestObserver = Callable[[str, int, bool], None]
 _request_observer: RequestObserver | None = None
 
@@ -240,10 +244,11 @@ def role_service_user_message(error: object) -> str:
             return "角色生成服务响应超时。请稍后恢复同一任务，不要重新提交。"
         return "暂时无法连接角色生成服务。请检查网络后恢复同一任务。"
     if isinstance(error, RoleServiceHttpError):
+        if error.status >= 500:
+            return "服务暂时不可用，请稍后再试。"
         if error.code == "invalid_enrollment":
             return "角色生成服务绑定信息已失效，请重新绑定。"
-        if error.code == "enrollment_rate_limited":
-            return "当前绑定请求较多，请稍后再试。"
+
         if error.status in {401, 403} or error.code == "invalid_token":
             return "角色生成服务连接已失效，请重新登录或绑定后再恢复任务。"
         if error.code == "insufficient_t2i_units":
@@ -258,12 +263,7 @@ def role_service_user_message(error: object) -> str:
             # Server counts this per batch (a new batch is a new chance), so the
             # copy must not suggest the account is done with codes for good.
             return "这一批兑换码每个账号只能兑换一次，你已兑换过同批次的码。"
-        if error.code == "storage_quota_exceeded":
-            return "角色素材暂存空间已满，请稍后重试或清理旧任务。"
-        if error.status == 429 or error.code == "rate_limited":
-            return "操作过于频繁，请稍后恢复同一任务。"
-        if error.status >= 500:
-            return "角色生成服务暂时不可用。请稍后恢复同一任务，不要重新提交。"
+
         return "角色生成服务拒绝了当前请求，请检查角色设定后重试。"
     if isinstance(error, OSError):
         return "本地任务文件处理失败。请恢复同一任务；若仍失败，请重启萌卫后再试。"
@@ -414,8 +414,8 @@ class HttpRoleServiceTransport:
             raise ValueError("role service timeouts must be positive")
         self.timeout = float(timeout)
         self.transfer_timeout = float(transfer_timeout)
-        # Tests replace this seam; patching the shared time module would also
-        # freeze unrelated helpers.
+
+
         self._transfer_sleep = time.sleep
 
     def _retry_transfer(self, operation: Callable[[], _T]) -> _T:
@@ -466,7 +466,7 @@ class HttpRoleServiceTransport:
             ok = True
             return result
         except RoleServiceHttpError as error:
-            # The service answered: the link itself worked.
+
             ok = error.status < 500
             raise
         finally:
@@ -511,7 +511,7 @@ class HttpRoleServiceTransport:
             except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError):
                 code = "http_error"
                 message = f"role service returned HTTP {exc.code}"
-            raise RoleServiceHttpError(exc.code, code, message) from exc
+            raise RoleServiceHttpError(exc.code, code, message) from None
         except (TimeoutError, urllib.error.URLError) as exc:
             reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
             code = "service_timeout" if isinstance(reason, TimeoutError) else "service_unreachable"
@@ -601,19 +601,7 @@ class HttpRoleServiceTransport:
         return self._retry_transfer(attempt)
 
     def preflight(self, *, timeout: float) -> None:
-        """Confirm the whole path to the service answers before a task starts.
-
-        Uploading a reference image is the first thing a task does and it is
-        also the most expensive thing to lose: a stalled proxy turns a few
-        megabytes into minutes of waiting that end in a failure the user could
-        have been told about immediately. This spends one small authenticated
-        request on the same host, TLS settings and credentials the task will
-        use, so a link that cannot carry the task fails here instead.
-
-        ``/healthz`` deliberately is not used. It is answered at the CDN edge,
-        so it stays ``200`` while the origin is down -- a probe that passes
-        while the service is unreachable is worse than no probe at all.
-        """
+        'Confirm the whole path to the service answers before a task starts.'
 
         self._request("GET", "/v1/account", timeout=timeout)
 
@@ -711,7 +699,7 @@ class HttpRoleServiceTransport:
         return MailboxThread.from_response(self._data(payload))
 
     def post_mailbox_message(self, message: MailboxMessageRequest) -> MailboxPostReceipt:
-        # Validate again at the network boundary, even for directly built objects.
+
         validated = MailboxMessageRequest.from_dict(message.to_dict())
         body = _json_bytes(validated.to_dict())
         if len(body) > MAX_MAILBOX_REQUEST_BYTES:

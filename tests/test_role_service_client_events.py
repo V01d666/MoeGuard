@@ -273,9 +273,6 @@ def _validate_event(event_name: str, properties: dict[str, object]) -> None:
     )
 
 
-# -- v0.4.0 heartbeats --------------------------------------------------------
-
-
 def test_latency_book_reports_percentiles_per_route_and_resets() -> None:
     from moeguard.cloud.role_service_client_events import RequestLatencyBook
 

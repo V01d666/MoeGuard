@@ -29,7 +29,7 @@ class CryptoBox:
         try:
             os.chmod(self._key_path, 0o600)
         except OSError:
-            # Windows 上 chmod 语义不同，忽略即可
+
             pass
         return key
 

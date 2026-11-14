@@ -1,17 +1,9 @@
-"""设置对话框：仅暴露 MVP 已交付的本地安防与通用配置。
-
-AI 对话与形象生成代码保留在 v2 实验层，但没有 MVP UI、凭据或提交入口。
-
-视觉层（feat/ui-modernization）：
-- 主题来自 moeguard.ui.theme，以 objectName 作用域限定，不影响其他窗口。
-- 分区卡片区分“识别与证据参数 / 数据与隐私（危险区）”等层级；
-  危险操作使用明确的危险样式并保留二次确认。
-- 仅做视觉与布局整理：不改任何配置字段、默认值、信号或保存语义。
-"""
+'本地桌宠、值守与更新设置。'
 
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QUrl, Signal, Slot
@@ -35,6 +27,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QSpinBox,
     QTabWidget,
     QToolButton,
@@ -42,8 +35,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from moeguard.config import AppConfig
-from moeguard.pet.role_assets import discover_bundled_roles
+from moeguard.config import AppConfig, PetConfig
+from moeguard.pet.role_assets import discover_bundled_roles, resolve_role_fps
 from moeguard.roles import InstalledRole, PackageKey, RoleContractError, RoleLibrary
 from moeguard.ui import theme
 from moeguard.ui.wheel_guard import guard_wheel
@@ -93,14 +86,7 @@ def _make_section(
 
 
 def import_role_source(library: RoleLibrary, source: Path) -> InstalledRole:
-    """Install a role the user points at, whether it is an archive or a folder.
-
-    The workbench saves a role by copying a plain directory to wherever the
-    user chooses, so what someone has on disk is usually a folder rather than
-    a ``.moeguard-role`` file. Accepting only the archive left paid roles with
-    no way back into the library. Both shapes route through the same staging
-    and verification gate in ``RoleLibrary``; nothing here relaxes it.
-    """
+    'Install a role the user points at, whether it is an archive or a folder.'
 
     source = Path(source)
     if source.is_dir():
@@ -145,6 +131,7 @@ class SettingsDialog(QDialog):
         self.setStyleSheet(theme.dialog_qss("settingsDialog"))
 
         self._config = config
+        self._role_fps_overrides = dict(config.pet.fps_overrides)
         self._role_library = role_library or RoleLibrary()
         self._custom_role_workbench_available = custom_role_workbench_available
         self._role_credit_dialog_available = role_credit_dialog_available
@@ -162,9 +149,7 @@ class SettingsDialog(QDialog):
         self._tabs = QTabWidget()
         layout.addWidget(self._tabs)
 
-        # v0.4.1：「通用」在前并默认打开；值守相关（触发、摄像头、证据）都在「安防」。
-        # 「通用」先建：它也创建「安防」页要放的值守触发和摄像头分区。
-        # D63/D70：AI 对话和形象生成均未进入 MVP，不得造成“可用”的错觉。
+
         self._build_general_tab()
         self._build_security_tab()
 
@@ -199,8 +184,8 @@ class SettingsDialog(QDialog):
         self.version_label = QLabel(f"版本 {installed_version()}")
         self.version_label.setAlignment(Qt.AlignCenter)
         self.version_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        # Equal outer columns keep the version at the window's center even
-        # though the links and action buttons have different widths.
+
+
         side_width = max(links.sizeHint().width(), buttons.sizeHint().width())
         for column in (0, 2):
             footer_layout.setColumnMinimumWidth(column, side_width)
@@ -211,7 +196,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.external_links_footer)
 
         self._tabs.setCurrentIndex(0)
-        # 滚动页面时，鼠标经过的数字框/下拉框不再被滚轮改值。
+
         guard_wheel(self)
 
     def _external_link_button(
@@ -239,9 +224,6 @@ class SettingsDialog(QDialog):
         if not QDesktopServices.openUrl(QUrl(url)):
             logger.warning("无法用系统默认浏览器打开项目页面: %s", url)
 
-    # ------------------------------------------------------------------ #
-    # 标签页 1: 安防
-    # ------------------------------------------------------------------ #
 
     def _build_security_tab(self) -> None:
         sec = self._config.security
@@ -256,7 +238,7 @@ class SettingsDialog(QDialog):
         page.addWidget(self._patrol_frame)
         page.addWidget(self._camera_frame)
 
-        # 分区：识别与证据参数
+
         param_frame, form = _make_section(
             "识别与证据",
             "识别与证据数据仅保存在本机。",
@@ -333,9 +315,6 @@ class SettingsDialog(QDialog):
         scroll.setWidget(tab)
         self._tabs.addTab(scroll, "安防")
 
-    # ------------------------------------------------------------------ #
-    # 标签页 2: 通用
-    # ------------------------------------------------------------------ #
 
     def _build_general_tab(self) -> None:
         pres = self._config.presence
@@ -439,6 +418,24 @@ class SettingsDialog(QDialog):
         self.role_selector.setCurrentIndex(max(0, selected_role))
         role_form.addRow("当前角色", self.role_selector)
 
+        fps_row = QWidget()
+        fps_layout = QHBoxLayout(fps_row)
+        fps_layout.setContentsMargins(0, 0, 0, 0)
+        self.role_fps_slider = QSlider(Qt.Horizontal)
+        self.role_fps_slider.setRange(1, 60)
+        self.role_fps_slider.setAccessibleName("播放帧率")
+        self.role_fps_value = QLabel()
+        self.role_fps_value.setMinimumWidth(55)
+        self.role_fps_reset = QPushButton("恢复默认")
+        fps_layout.addWidget(self.role_fps_slider, 1)
+        fps_layout.addWidget(self.role_fps_value)
+        fps_layout.addWidget(self.role_fps_reset)
+        role_form.addRow("播放帧率", fps_row)
+        self.role_fps_slider.valueChanged.connect(self._set_role_fps)
+        self.role_fps_reset.clicked.connect(self._reset_role_fps)
+        self.role_selector.currentIndexChanged.connect(self._update_role_fps)
+        self._update_role_fps()
+
         self.role_preview = QLabel("选择角色后显示待机预览")
         self.role_preview.setAlignment(Qt.AlignCenter)
         self.role_preview.setMinimumHeight(150)
@@ -450,7 +447,7 @@ class SettingsDialog(QDialog):
         role_actions_layout.setSpacing(8)
         role_action_buttons: list[QPushButton] = []
         if self._custom_role_workbench_available:
-            # 主操作（做自己的桌宠）放在最左。
+
             self.custom_role_button = QPushButton("桌宠工坊…")
             self.custom_role_button.setStyleSheet(theme.button_qss("accent"))
             self.custom_role_button.setToolTip(
@@ -489,7 +486,7 @@ class SettingsDialog(QDialog):
         self._update_role_management_state()
         self._update_role_preview()
 
-        # 值守触发（显示在「安防」页）
+
         patrol_frame, patrol_form = _make_section(
             "值守触发",
             "自动值守默认关闭，须先完成风险告知和主人注册。",
@@ -512,7 +509,7 @@ class SettingsDialog(QDialog):
         self.patrol_interval.setSuffix(" 秒")
         self.patrol_interval.setValue(pres.patrol_interval_sec)
         patrol_form.addRow("值守采样间隔", self.patrol_interval)
-        self._patrol_frame = patrol_frame  # 显示在「安防」页
+        self._patrol_frame = patrol_frame
 
         # 摄像头只给值守用，放在「安防」页。设置页不得为枚举设备而打开摄像头；
         # 实际可用性只在主人注册或用户明确开始值守时验证。
@@ -525,7 +522,7 @@ class SettingsDialog(QDialog):
         selected = self.camera_index.findData(cam.device_index)
         self.camera_index.setCurrentIndex(max(0, selected))
         camera_form.addRow("摄像头", self.camera_index)
-        self._camera_frame = camera_frame  # 显示在「安防」页
+        self._camera_frame = camera_frame
 
         shortcut_frame, shortcut_form = _make_section("快捷键")
         self.stealth_hotkey_edit = QKeySequenceEdit()
@@ -534,7 +531,7 @@ class SettingsDialog(QDialog):
         )
         shortcut_form.addRow("老板键（全局隐藏/恢复）", self.stealth_hotkey_edit)
 
-        # 主任务（桌宠外观）在最前；支持编号、数据目录这类少用的放最后。
+
         for frame in (role_frame, update_frame, shortcut_frame, about_frame):
             if frame is not None:
                 page.addWidget(frame)
@@ -576,14 +573,7 @@ class SettingsDialog(QDialog):
         )
 
     def _find_role_item(self, expected: object) -> int:
-        """Find role data with Python equality instead of QVariant identity.
-
-        PySide wraps arbitrary Python objects stored in a combo box.  Qt's
-        ``findData`` may then compare two equal ``PackageKey`` instances by
-        wrapper identity, causing an active managed role to appear missing.
-        Reading each item back and comparing in Python preserves the package
-        key's value semantics in both source and frozen builds.
-        """
+        'Find role data with Python equality instead of QVariant identity.'
         for index in range(self.role_selector.count()):
             if self.role_selector.itemData(index) == expected:
                 return index
@@ -603,7 +593,7 @@ class SettingsDialog(QDialog):
                     f"{installed.display_name}（自定义 v{installed.key.package_version}）",
                 )
 
-    def _update_role_preview(self) -> None:
+    def _selected_role_root(self) -> Path | None:
         selected = self.role_selector.currentData()
         root = None
         if isinstance(selected, PackageKey):
@@ -624,6 +614,30 @@ class SettingsDialog(QDialog):
             )
             root = role.root if role is not None else None
 
+        return root
+
+    def _update_role_fps(self) -> None:
+        pet = self._selected_pet()
+        fps = resolve_role_fps(
+            self._selected_role_root(), fallback=pet.fps, override=pet.fps_override,
+        )
+        self.role_fps_slider.blockSignals(True)
+        self.role_fps_slider.setValue(fps)
+        self.role_fps_slider.blockSignals(False)
+        self.role_fps_value.setText(f"{fps} FPS")
+        self.role_fps_reset.setEnabled(pet.fps_key in self._role_fps_overrides)
+
+    def _set_role_fps(self, fps: int) -> None:
+        self._role_fps_overrides[self._selected_pet().fps_key] = fps
+        self.role_fps_value.setText(f"{fps} FPS")
+        self.role_fps_reset.setEnabled(True)
+
+    def _reset_role_fps(self) -> None:
+        self._role_fps_overrides.pop(self._selected_pet().fps_key, None)
+        self._update_role_fps()
+
+    def _update_role_preview(self) -> None:
+        root = self._selected_role_root()
         frame = None
         if root is not None:
             native_idle = root / "actions" / "idle"
@@ -650,15 +664,7 @@ class SettingsDialog(QDialog):
         )
 
     def _import_role_package(self) -> None:
-        """Import a role folder the user saved from the workbench.
-
-        Only a directory is offered. "Save role package" copies a plain
-        folder, and every ``.moeguard-role`` archive in the product is an
-        internal transfer format -- uploads, the service download, the test
-        double -- so no user ever holds one. Asking which shape they had was
-        a question with one real answer. ``import_role_source`` still accepts
-        an archive for shared packages, should that ever become a feature.
-        """
+        'Import a role folder the user saved from the workbench.'
 
         selected = QFileDialog.getExistingDirectory(
             self,
@@ -730,9 +736,6 @@ class SettingsDialog(QDialog):
         bundled_default = self.role_selector.findData("lumen")
         self.role_selector.setCurrentIndex(max(0, bundled_default))
 
-    # ------------------------------------------------------------------ #
-    # 破坏性操作
-    # ------------------------------------------------------------------ #
 
     def _confirm_withdraw_patrol_consent(self) -> None:
         """二次确认后才请求应用删除人脸、证据和同意记录。"""
@@ -768,9 +771,6 @@ class SettingsDialog(QDialog):
         """撤回后拒绝用当前窗口中的旧值覆盖已保存的安全配置。"""
         return self._patrol_consent_withdrawn
 
-    # ------------------------------------------------------------------ #
-    # 返回所有配置值
-    # ------------------------------------------------------------------ #
 
     def _open_data_folder(self) -> None:
         try:
@@ -782,11 +782,7 @@ class SettingsDialog(QDialog):
         if not opened:
             QMessageBox.warning(self, "无法打开目录", "请检查本机数据目录权限后再试。")
 
-    def values(self) -> dict:
-        """返回所有配置值（用于更新 AppConfig）。
-
-        返回扁平字典，key 对应各子配置 dataclass 字段名。
-        """
+    def _selected_pet(self) -> PetConfig:
         selected_data = self.role_selector.currentData()
         keep_legacy_custom = selected_data == "__custom__"
         if isinstance(selected_data, PackageKey):
@@ -801,15 +797,22 @@ class SettingsDialog(QDialog):
             role_id = str(selected_data)
             role_package_version = 0
             assets_dir = ""
+        return replace(
+            self._config.pet, role_id=role_id, role_package_version=role_package_version,
+            assets_dir=assets_dir, fps_overrides=dict(self._role_fps_overrides),
+        )
+
+    def values(self) -> dict:
+        pet = self._selected_pet()
         return {
-            # 安防
+
             "face_match_threshold": round(self.face_threshold.value(), 3),
             "stranger_cooldown_sec": self.stranger_cooldown.value(),
             "video_clip_sec": self.video_clip_sec.value(),
             "retention_days": self.retention_days.value(),
             "blur_stranger_faces": self.blur_stranger.isChecked(),
             "motion_recording_enabled": self.motion_recording_enabled.isChecked(),
-            # 通用
+
             "idle_threshold_sec": self.away_threshold.value(),
             "auto_patrol_enabled": self.auto_patrol_enabled.isChecked(),
             "patrol_interval_sec": round(self.patrol_interval.value(), 1),
@@ -818,9 +821,10 @@ class SettingsDialog(QDialog):
                 self.auto_update_check_checkbox.isChecked() if self._self_update_available
                 else self._config.updates.auto_check_enabled
             ),
-            "role_id": role_id,
-            "role_package_version": role_package_version,
-            "assets_dir": assets_dir,
-            # 老板键
+            "role_id": pet.role_id,
+            "role_package_version": pet.role_package_version,
+            "assets_dir": pet.assets_dir,
+            "fps_overrides": dict(self._role_fps_overrides),
+
             "stealth_hotkey": self.stealth_hotkey_edit.keySequence().toString(),
         }

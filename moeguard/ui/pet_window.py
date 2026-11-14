@@ -1,24 +1,12 @@
-"""桌宠主窗口：无边框、透明背景、置顶。
-
-承载 QPixmap 序列帧动画渲染控件与文字气泡，支持：
-- 鼠标拖动改变桌宠位置。
-- 屏幕边缘吸附（半免打扰）：显示器上下左右四边只露局部。
-- 完全免打扰：隐藏桌宠，程序后台运行。
-- 点击触摸反应（mousePressEvent -> emit clicked 信号）。
-- 老板键/伪装模式（D18）：全局热键一键收缩为极简悬浮件。
-- 尺寸缩放持久化（wheelEvent 滚轮缩放）。
-- 气泡自动消失（QTimer 5 秒后 hide）。
-
-渲染方案（T8 选定，M0-1 已验证）：QPixmap 序列自绘 + QTimer 驱动。
-T1.6 定稿 25帧@6fps。
-"""
+'桌宠主窗口：无边框、透明背景、置顶。'
 
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QRegion, QWheelEvent
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QPixmap, QRegion, QWheelEvent
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 from moeguard.pet.frame_animation import FrameAnimationController
@@ -26,18 +14,20 @@ from moeguard.ui import theme
 
 logger = logging.getLogger(__name__)
 
-_EDGE_SNAP_MARGIN = 20  # 距屏幕边缘多少像素内触发吸附
-_DEFAULT_WIDTH = 200  # PRD §5.6: 默认显示尺寸
+_EDGE_SNAP_MARGIN = 20
+_DEFAULT_WIDTH = 200
 _DEFAULT_HEIGHT = 300
-_MIN_WIDTH = 100  # 缩放下限
+_MIN_WIDTH = 100
 _MIN_HEIGHT = 150
-_MAX_WIDTH = 512  # 素材最长边（PRD §5.6: 统一按最长边512存储）
+_MAX_WIDTH = 512
 _MAX_HEIGHT = 768
-_DEFAULT_FPS = 6  # T1.6 定稿 25帧@6fps
-_BUBBLE_TIMEOUT_MS = 5000  # 气泡自动消失时间
-_BUBBLE_CONTENT_GAP = 24  # 气泡底边与角色可见 bbox 顶边的固定间距
-_SCREEN_EDGE_HEAD_REVEAL_PIXELS = 64  # 上下边缘固定只露出 bbox 顶部像素
-_STEALTH_KEY = "Ctrl+Shift+H"  # D18 老板键热键
+_DEFAULT_FPS = 6
+_BUBBLE_TIMEOUT_MS = 5000
+_BUBBLE_CONTENT_GAP = 24
+_SCREEN_EDGE_HEAD_REVEAL_PIXELS = 64
+_STEALTH_KEY = "Ctrl+Shift+H"
+_RENDER_CACHE_MAX_FRAMES = 32
+_RENDER_CACHE_MAX_BYTES = 32 * 1024 * 1024
 
 
 class _MessageBubble(QLabel):
@@ -158,10 +148,13 @@ class PetWindow(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.resize(_DEFAULT_WIDTH, _DEFAULT_HEIGHT)
 
-        # 帧动画控制器
+
         self._fps = fps
         self._custom_role_workbench_available = False
         self._frame_controller = frame_controller or FrameAnimationController(self)
+        self._render_cache: OrderedDict[int, tuple[QPixmap, QRect]] = OrderedDict()
+        self._render_cache_bytes = 0
+        self._render_cache_context: tuple[int, int, float] | None = None
         self._frame_controller.animation_changed.connect(self._on_animation_changed)
         self.set_edge_reveal_fraction(edge_reveal_fraction)
         self._edge_surface: QRect | None = None
@@ -169,58 +162,51 @@ class PetWindow(QWidget):
         self._edge_anchor_content_rect: QRect | None = None
         self._edge_anchor_reveal_pixels: int | None = None
 
-        # 文字气泡：独立浮窗，每次 show_message 时创建/销毁
+
         self._bubble: _MessageBubble | None = None
-        # 一次气泡只采集一个稳定锚点。生成动画里一列头发/斗篷像素的变化，
-        # 以及 click 恢复 idle 的动作切换，都不应让文字跟着跳动；窗口移动和
-        # 缩放仍会跟随。
+
+
         self._bubble_anchor_center_ratio: float | None = None
         self._bubble_anchor_top_ratio: float | None = None
         self._visible_content_rect: QRect | None = None
 
-        # 气泡自动消失定时器
+
         self._bubble_timer = QTimer(self)
         self._bubble_timer.setSingleShot(True)
         self._bubble_timer.setInterval(_BUBBLE_TIMEOUT_MS)
         self._bubble_timer.timeout.connect(self.hide_message)
 
-        # 动画重绘定时器
+
         self._paint_timer = QTimer(self)
         self._paint_timer.setInterval(int(1000 / fps))
         self._paint_timer.timeout.connect(self.update)
 
-        # 拖动状态
+
         self._drag_offset = None
         self._dragging = False
-        # M4: 拖拽触发阈值 10px，移动超过此距离触发 dragging
+
         self._drag_threshold = 10
         self._press_pos = None
-        # 长按计时器：按住不动超过阈值时间也进入 dragging
+
         self._long_press_timer = QTimer(self)
         self._long_press_timer.setSingleShot(True)
-        self._long_press_timer.setInterval(300)  # 300ms 判定为长按
+        self._long_press_timer.setInterval(300)
         self._long_press_timer.timeout.connect(self._on_long_press)
 
-        # 伪装模式
+
         self._stealth_mode = False
-        self._global_hotkey = None  # GlobalHotkey 实例（register_stealth_hotkey 时赋值）
+        self._global_hotkey = None
         self._saved_geometry = None
 
-        # 滚轮缩放持久化回调
+
         self._scale_persist_callback = None
 
-    # ------------------------------------------------------------------ #
-    # 显示事件
-    # ------------------------------------------------------------------ #
 
     def showEvent(self, event) -> None:  # noqa: N802
         """窗口显示时启动重绘定时器。"""
         super().showEvent(event)
         self._paint_timer.start()
 
-    # ------------------------------------------------------------------ #
-    # 帧动画
-    # ------------------------------------------------------------------ #
 
     @property
     def frame_controller(self) -> FrameAnimationController:
@@ -240,9 +226,16 @@ class PetWindow(QWidget):
         self._paint_timer.setInterval(int(1000 / fps))
         self._paint_timer.start()
 
+    def set_playback_fps(self, fps: int) -> None:
+        if type(fps) is not int or fps <= 0:
+            raise ValueError("fps must be a positive integer")
+        self._fps = fps
+        self._paint_timer.setInterval(max(1, int(1000 / fps)))
+
     def _on_animation_changed(self, action_name: str) -> None:
         """动画切换回调。"""
         logger.debug("PetWindow 动画切换: %s", action_name)
+        self._clear_render_cache()
 
     def set_edge_reveal_fraction(self, value: float) -> None:
         """Set how much character height remains visible at top/bottom edges."""
@@ -260,9 +253,6 @@ class PetWindow(QWidget):
             action = self._frame_controller.current_action
             self.animation_finished.emit(action)
 
-    # ------------------------------------------------------------------ #
-    # 文字气泡
-    # ------------------------------------------------------------------ #
 
     def show_message(self, text: str) -> None:
         """显示文字气泡（独立浮窗在桌宠上方，5 秒后自动消失）。"""
@@ -271,8 +261,8 @@ class PetWindow(QWidget):
         self.hide_message()
 
         self._bubble = _MessageBubble()
-        # 圆角面板由 _MessageBubble 显式绘制；这里只负责文字布局，避免
-        # Windows 透明顶层窗口吞掉 QSS 背景后只剩文字。
+
+
         self._bubble.setStyleSheet(
             "background: transparent; border: none;\n"
             f"color: {theme.TEXT_PRIMARY};\n"
@@ -284,7 +274,7 @@ class PetWindow(QWidget):
         self._bubble.setText(text)
         self._bubble.adjustSize()
 
-        # 定位在桌宠窗口上方，水平居中，底部留固定间距
+
         self._capture_bubble_anchor()
         self._reposition_bubble()
         self._bubble.show()
@@ -330,8 +320,8 @@ class PetWindow(QWidget):
         ):
             self._capture_bubble_anchor()
         top_left = self.frameGeometry().topLeft()
-        # 锚点只在动作边界更新，因此这里的四舍五入不会产生逐帧奇偶抖动；
-        # 同时避免 70/300 * 450 之类的浮点表示把固定间距截短 1px。
+
+
         anchor_x = round(self.width() * self._bubble_anchor_center_ratio)
         anchor_top = round(self.height() * self._bubble_anchor_top_ratio)
         bx = top_left.x() + anchor_x - self._bubble.width() // 2
@@ -345,7 +335,7 @@ class PetWindow(QWidget):
         if screen is not None:
             bounds = screen.availableGeometry()
             if by < bounds.y():
-                # 上方放不下就翻到角色下方；那里的可见底边同样由锚点决定。
+
                 visible = self._current_content_rect()
                 by = (
                     top_left.y()
@@ -371,9 +361,6 @@ class PetWindow(QWidget):
             self._maintain_surface_snap()
         self._reposition_bubble()
 
-    # ------------------------------------------------------------------ #
-    # 伪装模式（D18 老板键）
-    # ------------------------------------------------------------------ #
 
     def toggle_stealth(self) -> None:
         """切换伪装模式。
@@ -393,7 +380,7 @@ class PetWindow(QWidget):
         self.hide_message()
         self._paint_timer.stop()
         self._frame_controller.stop()
-        # 收缩为极简悬浮件（小圆点尺寸）
+
         self.resize(20, 20)
         self.update()
         self.stealth_toggled.emit(True)
@@ -422,7 +409,7 @@ class PetWindow(QWidget):
         """
         from moeguard.utils.global_hotkey import GlobalHotkey
 
-        # 先注销旧热键
+
         self.unregister_stealth_hotkey()
 
         self._global_hotkey = GlobalHotkey(self)
@@ -436,9 +423,6 @@ class PetWindow(QWidget):
             self._global_hotkey.deleteLater()
             self._global_hotkey = None
 
-    # ------------------------------------------------------------------ #
-    # 尺寸缩放持久化
-    # ------------------------------------------------------------------ #
 
     def set_scale_persist_callback(self, callback) -> None:
         """设置缩放持久化回调。
@@ -454,9 +438,6 @@ class PetWindow(QWidget):
             self._scale_persist_callback(self.width(), self.height())
         self.scale_changed.emit(self.width(), self.height())
 
-    # ------------------------------------------------------------------ #
-    # 完全免打扰
-    # ------------------------------------------------------------------ #
 
     def hide_pet(self) -> None:
         """完全免打扰：隐藏桌宠，程序后台运行。"""
@@ -478,62 +459,80 @@ class PetWindow(QWidget):
         self._long_press_timer.stop()
         self.unregister_stealth_hotkey()
         self.hide_message()
+        self._clear_render_cache()
         self.hide()
 
-    # ------------------------------------------------------------------ #
-    # 绘制
-    # ------------------------------------------------------------------ #
+
+    def _clear_render_cache(self) -> None:
+        self._render_cache.clear()
+        self._render_cache_bytes = 0
+        self._render_cache_context = None
+
+    def _rendered_frame(self, frame: QPixmap) -> tuple[QPixmap, QRect]:
+        context = (self.width(), self.height(), self.devicePixelRatioF())
+        if context != self._render_cache_context:
+            self._clear_render_cache()
+            self._render_cache_context = context
+        key = frame.cacheKey()
+        cached = self._render_cache.get(key)
+        if cached is not None:
+            self._render_cache.move_to_end(key)
+            return cached
+        scaled = frame.scaled(
+            self.width(), self.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation,
+        )
+        x = (self.width() - scaled.width()) // 2
+        y = (self.height() - scaled.height()) // 2
+        bounds = QRegion(scaled.mask()).boundingRect()
+        content = (bounds.translated(x, y) if not bounds.isEmpty()
+                   else QRect(x, y, scaled.width(), scaled.height()))
+        size = scaled.width() * scaled.height() * scaled.depth() // 8
+        if size <= _RENDER_CACHE_MAX_BYTES:
+            while self._render_cache and (
+                len(self._render_cache) >= _RENDER_CACHE_MAX_FRAMES
+                or self._render_cache_bytes + size > _RENDER_CACHE_MAX_BYTES
+            ):
+                old, _ = self._render_cache.popitem(last=False)[1]
+                self._render_cache_bytes -= old.width() * old.height() * old.depth() // 8
+            self._render_cache[key] = (scaled, content)
+            self._render_cache_bytes += size
+        return scaled, content
+
 
     def paintEvent(self, event) -> None:  # noqa: N802
         """绘制当前帧。"""
         if self._stealth_mode:
-            # 伪装模式：绘制小圆点
-            painter = QPainter(self)
-            painter.setRenderHint(QPainter.Antialiasing)
-            painter.setBrush(Qt.gray)
-            painter.setPen(Qt.NoPen)
-            painter.drawEllipse(2, 2, self.width() - 4, self.height() - 4)
+
+            with QPainter(self) as painter:
+                painter.setRenderHint(QPainter.Antialiasing)
+                painter.setBrush(Qt.gray)
+                painter.setPen(Qt.NoPen)
+                painter.drawEllipse(2, 2, self.width() - 4, self.height() - 4)
             return
 
         frame = self._frame_controller.get_current_frame()
         if frame is None or frame.isNull():
             return
 
-        painter = QPainter(self)
-        # 缩放到显示尺寸（PRD §5.6: 平滑变换）
-        scaled = frame.scaled(
-            self.width(),
-            self.height(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
-        )
-        # 居中绘制
+        scaled, content = self._rendered_frame(frame)
         x = (self.width() - scaled.width()) // 2
         y = (self.height() - scaled.height()) // 2
-        painter.drawPixmap(x, y, scaled)
-
-        mask_rect = QRegion(scaled.mask()).boundingRect()
-        self._visible_content_rect = (
-            mask_rect.translated(x, y)
-            if not mask_rect.isEmpty()
-            else QRect(x, y, scaled.width(), scaled.height())
-        )
+        with QPainter(self) as painter:
+            painter.drawPixmap(x, y, scaled)
+        self._visible_content_rect = QRect(content)
         self._maintain_surface_snap()
         self._reposition_bubble()
 
-        # 检查非循环动画是否播放完毕
+
         self._check_animation_finished()
 
-    # ------------------------------------------------------------------ #
-    # 鼠标事件：点击 + 拖动 + 边缘吸附
-    # ------------------------------------------------------------------ #
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if event.button() == Qt.LeftButton:
             self._press_pos = event.globalPosition().toPoint()
             self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             self._dragging = False
-            self._long_press_timer.start()  # 启动长按计时器
+            self._long_press_timer.start()
 
     def _on_long_press(self) -> None:
         """长按超时：进入 dragging 状态（即使没有移动）。"""
@@ -545,13 +544,13 @@ class PetWindow(QWidget):
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if self._drag_offset is not None and event.buttons() & Qt.LeftButton:
             current_pos = event.globalPosition().toPoint()
-            # 判断是否超过拖动阈值（区分点击与拖动）
+
             if (
                 self._press_pos is not None
                 and not self._dragging
                 and (current_pos - self._press_pos).manhattanLength() > self._drag_threshold
             ):
-                self._long_press_timer.stop()  # 移动触发，停止长按计时器
+                self._long_press_timer.stop()
                 self.clear_surface_snap()
                 self._dragging = True
                 self.drag_started.emit()
@@ -566,15 +565,14 @@ class PetWindow(QWidget):
                 self.drag_ended.emit()
                 self._check_edge_snap()
             else:
-                # 未拖动且未长按 -> 点击
+
                 self.clicked.emit()
         self._drag_offset = None
         self._press_pos = None
 
     def _check_edge_snap(self) -> None:
         """拖动结束时检测显示器的固定上下左右四边。"""
-        # “屏幕边缘”指显示器的物理四边。availableGeometry() 会排除任务栏，
-        # 但置顶透明窗口不会在任务栏边界被裁切，反而会额外露出整段任务栏高度。
+        # 使用物理屏幕geometry；availableGeometry排除任务栏，但透明置顶窗口不在其边界裁切。
         screen = self.screen().geometry() if self.screen() else None
         if screen is None:
             return
@@ -582,25 +580,20 @@ class PetWindow(QWidget):
         direction: str | None = None
 
         if pos.x() <= screen.left() + _EDGE_SNAP_MARGIN:
-            direction = "left"  # 探出左半身
+            direction = "left"
         elif pos.x() + self.width() >= screen.right() - _EDGE_SNAP_MARGIN:
-            direction = "right"  # 探出右半身
+            direction = "right"
         elif pos.y() <= screen.top() + _EDGE_SNAP_MARGIN:
-            direction = "top"  # 倒挂向下探头
+            direction = "top"
         elif pos.y() + self.height() >= screen.bottom() - _EDGE_SNAP_MARGIN:
-            direction = "bottom"  # 正常向上探头
+            direction = "bottom"
 
         if direction:
             self.edge_snapped.emit(direction)
             self.snap_to_surface(screen, direction)
 
     def snap_to_surface(self, surface: QRect, direction: str) -> None:
-        """Attach to an arbitrary target rectangle using current visible content.
-
-        The current runtime passes the display work area and one of its four
-        fixed edges. A future window tracker may reuse this explicit rectangle
-        API, but v0.2 does not discover or follow application windows.
-        """
+        'Attach to an arbitrary target rectangle using current visible content.'
         self._edge_surface = QRect(surface)
         self._edge_direction = direction
         self._capture_surface_anchor()
@@ -643,18 +636,7 @@ class PetWindow(QWidget):
         frame = self._frame_controller.get_current_frame()
         if frame is None or frame.isNull():
             return self._visible_content_rect or self.rect()
-        scaled = frame.scaled(
-            self.width(),
-            self.height(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
-        )
-        x = (self.width() - scaled.width()) // 2
-        y = (self.height() - scaled.height()) // 2
-        mask_rect = QRegion(scaled.mask()).boundingRect()
-        if mask_rect.isEmpty():
-            return QRect(x, y, scaled.width(), scaled.height())
-        return mask_rect.translated(x, y)
+        return QRect(self._rendered_frame(frame)[1])
 
     def _maintain_surface_snap(self) -> None:
         """Keep the one captured snap anchor stable while frames animate."""
@@ -673,12 +655,9 @@ class PetWindow(QWidget):
         if self.pos() != desired:
             self.move(desired)
 
-    # ------------------------------------------------------------------ #
-    # 右键菜单
-    # ------------------------------------------------------------------ #
 
     def set_custom_role_workbench_available(self, available: bool) -> None:
-        """设置右键菜单是否显示 v0.2 桌宠工坊直达入口。"""
+        '设置右键菜单是否显示 桌宠工坊直达入口。'
         self._custom_role_workbench_available = bool(available)
 
     def _build_context_menu(self):
@@ -687,7 +666,7 @@ class PetWindow(QWidget):
 
         menu = QMenu(self)
 
-        # v0.4.1：桌宠工坊放最前（做自己的桌宠是主功能），退出放最后。
+
         if self._custom_role_workbench_available:
             act_custom_role = menu.addAction("桌宠工坊…")
             act_custom_role.triggered.connect(
@@ -715,9 +694,6 @@ class PetWindow(QWidget):
 
         menu.exec(event.globalPos())
 
-    # ------------------------------------------------------------------ #
-    # 滚轮缩放
-    # ------------------------------------------------------------------ #
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
         """滚轮缩放桌宠尺寸，并持久化。"""
@@ -730,7 +706,7 @@ class PetWindow(QWidget):
         new_w = int(self.width() * scale_factor)
         new_h = int(self.height() * scale_factor)
 
-        # 限制范围
+
         new_w = max(_MIN_WIDTH, min(_MAX_WIDTH, new_w))
         new_h = max(_MIN_HEIGHT, min(_MAX_HEIGHT, new_h))
 

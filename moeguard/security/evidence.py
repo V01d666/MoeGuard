@@ -1,11 +1,4 @@
-"""陌生人证据录制（触发式短视频 + 截图）。
-
-T14: 编码器用 MJPG + AVI（零专利风险、零额外依赖、Windows 原生）。
-D25: MVP 不做音频录制。
-D20: 证据存 ~/.moeguard/evidence/（用户可见路径）。
-30s 冷却去重（stranger_cooldown_sec），避免同一事件重复录制。
-blur_stranger_faces 选项：隐私模式下模糊陌生人脸。
-"""
+'本地截图与无声短视频证据录制。'
 
 from __future__ import annotations
 
@@ -27,7 +20,7 @@ from moeguard.security.face import FaceRecognizer
 
 logger = logging.getLogger(__name__)
 
-# MJPG fourcc 编码器（T14: 零专利风险）
+
 _FOURCC = cv2.VideoWriter_fourcc(*"MJPG")
 _VIDEO_EXT = ".avi"
 _SNAPSHOT_EXT = ".jpg"
@@ -90,9 +83,6 @@ class EvidenceRecorder(QObject):
         self._cancel_event = threading.Event()
         self._thread: threading.Thread | None = None
 
-    # ------------------------------------------------------------------ #
-    # 冷却判定
-    # ------------------------------------------------------------------ #
 
     def is_in_cooldown(self, now: float | None = None) -> bool:
         """是否在冷却期内（避免重复录制）。"""
@@ -174,9 +164,6 @@ class EvidenceRecorder(QObject):
         with self._lock:
             self._recording = False
 
-    # ------------------------------------------------------------------ #
-    # 视频录制
-    # ------------------------------------------------------------------ #
 
     def _record_async(
         self,
@@ -198,7 +185,7 @@ class EvidenceRecorder(QObject):
             pending_dir.mkdir(parents=True, exist_ok=False)
             ts_str = time.strftime("%Y%m%d_%H%M%S", time.localtime(ts))
 
-            # 截图优先：即使后续 60 秒视频仍在写入，首张证据已落盘。
+
             first_frame = camera.grab()
             if first_frame is None:
                 raise RuntimeError("无法获取摄像头首帧")
@@ -327,7 +314,7 @@ class EvidenceRecorder(QObject):
             x2_i, y2_i = int(min(frame.shape[1], x2)), int(min(frame.shape[0], y2))
             if x2_i <= x1_i or y2_i <= y1_i:
                 continue
-            # 高斯模糊人脸区域
+
             face_region = result[y1_i:y2_i, x1_i:x2_i]
             if face_region.size > 0:
                 blurred = cv2.GaussianBlur(face_region, (51, 51), 30)
@@ -348,12 +335,9 @@ class EvidenceRecorder(QObject):
         )
         return cv2.resize(small, (width, height), interpolation=cv2.INTER_NEAREST)
 
-    # ------------------------------------------------------------------ #
-    # 工具
-    # ------------------------------------------------------------------ #
 
     def reset_cooldown(self) -> None:
         """重置冷却计时器（手动触发时使用）。"""
         self._last_record_time = 0.0
 
-    recording_finished = Signal(object)  # EvidenceResult
+    recording_finished = Signal(object)

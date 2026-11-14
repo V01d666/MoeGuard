@@ -1,11 +1,4 @@
-"""人脸检测与特征提取（YuNet + SFace，纯本地 ONNX 推理）。
-
-D16: 采用 OpenCV Zoo 的 YuNet（检测，MIT）+ SFace（识别，Apache-2.0）。
-模型文件按需从 OpenCV Zoo GitHub 下载到 ~/.moeguard/models/，推理全程不出设备。
-
-懒加载：首次调用 detect() 时才加载 ONNX 模型，避免启动卡顿。
-det_size 默认 (320,320)，常驻值守模式更快；M0-2 测试用 (640,640) 精度更高。
-"""
+'YuNet与SFace的本地ONNX人脸检测和特征提取。'
 
 from __future__ import annotations
 
@@ -27,7 +20,7 @@ from moeguard.utils.paths import (
 
 logger = logging.getLogger(__name__)
 
-# OpenCV Zoo GitHub raw URLs（模型自动下载）
+
 _MODEL_URLS: dict[str, str] = {
     "face_detection_yunet_2023mar.onnx": (
         "https://github.com/opencv/opencv_zoo/raw/main/models/"
@@ -39,7 +32,7 @@ _MODEL_URLS: dict[str, str] = {
     ),
 }
 
-# 下载超时（秒）
+
 _DOWNLOAD_TIMEOUT = 60
 
 
@@ -68,9 +61,6 @@ class FaceRecognizer:
         self._detector: cv2.FaceDetectorYN | None = None
         self._recognizer: cv2.FaceRecognizerSF | None = None
 
-    # ------------------------------------------------------------------ #
-    # 模型加载（懒加载 + 自动下载）
-    # ------------------------------------------------------------------ #
 
     def _ensure_loaded(self) -> None:
         """懒加载模型：首次调用时下载并初始化 YuNet + SFace。"""
@@ -146,9 +136,6 @@ class FaceRecognizer:
                 tmp.unlink(missing_ok=True)
             raise
 
-    # ------------------------------------------------------------------ #
-    # 检测接口
-    # ------------------------------------------------------------------ #
 
     def detect(self, frame: np.ndarray) -> list[dict]:
         """检测帧中所有人脸。
@@ -169,15 +156,15 @@ class FaceRecognizer:
         h, w = frame.shape[:2]
         detector_frame = frame
         if self._input_strategy == "native":
-            # Production behavior: let YuNet see the original camera frame.
+
             self._detector.setInputSize((w, h))
         else:
-            # T5-2 comparator: resize to a stable 320×320 input and map
-            # YuNet landmarks back before using SFace on the original frame.
+
+
             detector_frame = cv2.resize(frame, self._det_size)
             self._detector.setInputSize(self._det_size)
 
-        # YuNet 返回 (N, 15)：[x, y, w, h, lm_re_x, lm_re_y, ..., score]
+
         retval, faces = self._detector.detect(detector_frame)
         if faces is None or len(faces) == 0:
             return []
@@ -191,7 +178,7 @@ class FaceRecognizer:
             score = float(face_row[-1])
             bbox = np.array([x, y, x + fw, y + fh], dtype=np.float32)
 
-            # SFace 需要先对齐裁剪再提取特征
+
             aligned = self._recognizer.alignCrop(frame, face_row.reshape(1, -1))
             embedding = self._recognizer.feature(aligned).flatten()
 
@@ -214,9 +201,6 @@ class FaceRecognizer:
         scaled[[1, 3, 5, 7, 9, 11, 13]] *= original_height / height
         return scaled
 
-    # ------------------------------------------------------------------ #
-    # 特征比对
-    # ------------------------------------------------------------------ #
 
     @staticmethod
     def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -226,7 +210,7 @@ class FaceRecognizer:
         """
         a_flat = a.flatten().astype(np.float32)
         b_flat = b.flatten().astype(np.float32)
-        # 手动余弦相似度（与 SFace FR_COSINE 语义一致）
+
         dot = float(np.dot(a_flat, b_flat))
         norm = float(np.linalg.norm(a_flat) * np.linalg.norm(b_flat))
         if norm < 1e-12:
@@ -251,12 +235,9 @@ class FaceRecognizer:
 
         f1 = crop_feature.reshape(1, -1).astype(np.float32)
         f2 = registered_feature.reshape(1, -1).astype(np.float32)
-        # OpenCV 5.0: FR_COSINE 直接返回余弦相似度（非距离）
+
         return float(self._recognizer.match(f1, f2, cv2.FaceRecognizerSF_FR_COSINE))
 
-    # ------------------------------------------------------------------ #
-    # 工具方法
-    # ------------------------------------------------------------------ #
 
     def set_det_size(self, size: tuple[int, int]) -> None:
         """更新检测输入尺寸（下次 detect 生效）。"""

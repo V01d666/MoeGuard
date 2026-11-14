@@ -1,16 +1,4 @@
-"""陪伴 ⇄ 值守 状态机（D15 修正版）。
-
-这是萌卫的中枢：订阅锁屏/解锁、键鼠空闲、手动操作等事件，驱动
-COMPANION（陪伴）与 PATROL（值守）之间的切换，并向桌宠、安防子系统
-广播状态变化。
-
-关键决议 D15：**系统解锁事件是唯一权威退出信号**。
-- 人脸识别结果（陌生人/主人）**不驱动状态转换**，只触发对应副作用
-  （证据录制 / 欢迎预热）。
-- 解锁即退出值守，不论人脸识别结果如何。
-- 主人在值守中被识别 → owner_greeted 信号（标记欢迎预热），不退出。
-- 陌生人在值守中被检测 → stranger_detected 信号（驱动证据录制），不改变状态。
-"""
+'陪伴与值守状态机；解锁退出值守，人脸识别只发出检测事件。'
 
 from __future__ import annotations
 
@@ -31,24 +19,13 @@ class AppState(Enum):
 
 
 class StateMachine(QObject):
-    """管理陪伴与值守之间的状态转换。
+    '管理陪伴与值守之间的状态转换。'
 
-    信号说明：
-    - state_changed:    状态切换（COMPANION ⇄ PATROL）
-    - patrol_started:   进入值守（安防子系统应启动摄像头）
-    - patrol_ended:     退出值守（安防子系统应停止摄像头 + 触发汇报）
-    - stranger_detected: 陌生人事件（安防子系统应录制证据）
-    - owner_greeted:    主人识别（仅标记欢迎预热，不退出值守）
-
-    D15: 解锁（on_unlock）是唯一权威退出信号；
-         人脸识别结果不驱动状态转换。
-    """
-
-    state_changed = Signal(object)  # AppState
+    state_changed = Signal(object)
     patrol_started = Signal()  # 进入值守（启动摄像头）
     patrol_ended = Signal()  # 退出值守（停止摄像头）
-    stranger_detected = Signal()  # 陌生人事件（驱动证据录制）
-    owner_greeted = Signal(bool)  # 主人识别（仅标记欢迎预热，不退出值守）
+    stranger_detected = Signal()
+    owner_greeted = Signal(bool)
 
     def __init__(self) -> None:
         super().__init__()
@@ -57,9 +34,7 @@ class StateMachine(QObject):
         self._incident_count: int = 0
         self._owner_greeted_this_session: bool = False
 
-    # ------------------------------------------------------------------
-    # 属性
-    # ------------------------------------------------------------------
+
     @property
     def state(self) -> AppState:
         """当前状态。"""
@@ -118,11 +93,7 @@ class StateMachine(QObject):
     # 退出值守的入口（解锁 / 手动）
     # ------------------------------------------------------------------
     def on_unlock(self) -> None:
-        """解锁事件 → 退出值守（D15: 唯一权威退出信号）。
-
-        仅 PATROL → COMPANION 有效。
-        注意：不论人脸识别结果如何，解锁就退出。
-        """
+        '解锁事件 → 退出值守。'
         if self._state is not AppState.PATROL:
             logger.debug("on_unlock: 不在值守模式，忽略")
             return
@@ -151,16 +122,9 @@ class StateMachine(QObject):
         self.state_changed.emit(self._state)
         self.patrol_ended.emit()
 
-    # ------------------------------------------------------------------
-    # 值守中的检测事件（D15: 不驱动状态转换）
-    # ------------------------------------------------------------------
-    def on_stranger(self) -> None:
-        """陌生人检测事件（值守中有效）。
 
-        D15: 不改变状态，仅 emit stranger_detected。事件计数必须等到
-        证据目录和数据库都提交成功后由 ``confirm_incident`` 增加，避免
-        冷却、写盘失败或取消造成账实不一致。
-        """
+    def on_stranger(self) -> None:
+        '陌生人检测事件（值守中有效）。'
         if self._state is not AppState.PATROL:
             logger.debug("on_stranger: 不在值守模式，忽略")
             return
@@ -176,12 +140,7 @@ class StateMachine(QObject):
         logger.warning("陌生人事件已提交（第 %d 次）", self._incident_count)
 
     def on_owner_recognized(self) -> None:
-        """主人识别事件（D15: 不驱动状态转换）。
-
-        仅在 PATROL 状态有效，emit owner_greeted 标记「欢迎预热」。
-        **不退出值守**——退出值守的唯一权威信号是解锁（on_unlock）。
-        owner_greeted 的 bool 参数表示是否为本次值守首次识别（True=首次预热）。
-        """
+        '主人识别事件。'
         if self._state is not AppState.PATROL:
             logger.debug("on_owner_recognized: 不在值守模式，忽略")
             return
@@ -190,9 +149,7 @@ class StateMachine(QObject):
         logger.info("值守中识别到主人（欢迎预热，不退出值守，首次=%s）", is_first)
         self.owner_greeted.emit(is_first)
 
-    # ------------------------------------------------------------------
-    # 辅助
-    # ------------------------------------------------------------------
+
     def reset_incidents(self) -> None:
         """重置事件计数与欢迎标记（每次进入值守时调用）。"""
         self._incident_count = 0

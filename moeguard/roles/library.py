@@ -135,7 +135,7 @@ class RoleLibrary:
                 if previous is None or package.package_version > previous[0]:
                     latest[package.role_id] = (package.package_version, package.display_name)
         resolved: dict[str, str] = {}
-        # Existing aliases win; unlabelled legacy roles are assigned deterministically.
+
         for role_id in sorted(latest, key=lambda key: (key not in stored, key)):
             wanted = stored.get(role_id, latest[role_id][1])
             resolved[role_id] = unique_role_name(wanted, set(resolved.values()))

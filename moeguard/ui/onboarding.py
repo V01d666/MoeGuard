@@ -1,22 +1,4 @@
-"""首次启动气泡式引导（M4 重写；v0.4.1 拆成两种）。
-
-将 QWizard 改为轻量气泡式引导，悬浮在桌宠头上。
-透明无边框小窗口，定位在桌宠上方，显示引导文字 + 操作按钮。
-不阻塞主线程，桌宠保持可见。
-
-mode="intro"（首次启动，只出现一次）:
-  Step 0: 一句话介绍 + [知道了]
-
-mode="patrol"（用户要进入值守、或从托盘打开值守设置时）:
-  Step 1: 值守风险告知 + 主动同意 / 仅使用桌宠（已有本版本同意时从 Step 2 开始）
-  Step 2: 询问是否注册主人脸 + [好呀] [跳过]
-  Step 3 (如果选好呀): 摄像头预览 + [拍一张] -> 等待注册结果
-  Step 4: 完成提示 + [完成]
-
-结束时 ``outcome`` 记录用户怎么结束的（埋点用，只有枚举值）：
-intro → acknowledged / closed；patrol → declined / owner_skipped /
-owner_registered / closed。
-"""
+'桌宠介绍、值守告知与主人注册气泡。'
 
 from __future__ import annotations
 
@@ -37,15 +19,14 @@ from moeguard.ui import theme
 
 logger = logging.getLogger(__name__)
 
-# 气泡尺寸
+
 _BUBBLE_WIDTH = 280
 _BUBBLE_HEIGHT = 140
-_BUBBLE_MARGIN = 10  # 气泡与桌宠顶部间距
+_BUBBLE_MARGIN = 10
 _PREVIEW_W = 240  # 摄像头预览固定宽度
 _PREVIEW_H = 180  # 摄像头预览固定高度
 
-# 气泡 QSS：主题统一调色（暖白圆角 + 低饱和主色按钮 + 次要按钮）。
-# 作用域限定在 #onboardingBubble，不会泄漏到桌宠或其他窗口。
+
 _BUBBLE_QSS = f"""
 QWidget#onboardingBubble {{
     {theme.bubble_qss(theme.RADIUS_XLARGE)}
@@ -104,11 +85,10 @@ QWidget#onboardingBubble QScrollBar::sub-line:vertical {{
 }}
 """
 
-# 首次启动只说一句：桌宠能做什么、入口在哪
-# 手动在第二个逗号后换行：按宽度自动折行会把「做你 / 自己的桌宠」拆开
+
 INTRO_TEXT = "拖我换位置，右键打开桌宠工坊，\n做你自己的桌宠"
 
-# 引导文字
+
 _STEP_TEXTS: dict[int, str] = {
     0: INTRO_TEXT,
     1: (
@@ -133,11 +113,11 @@ class OnboardingBubble(QWidget):
         register_owner: 请求注册主人脸（Step 3 拍照时发射）。
     """
 
-    finished = Signal(str)  # 选定的形象路径（空=跳过）
+    finished = Signal(str)
     consent_granted = Signal()
     consent_declined = Signal()
     preview_requested = Signal()  # 请求启动摄像头预览（进入 Step 3 时）
-    register_owner = Signal()  # 请求注册主人脸（拍照时）
+    register_owner = Signal()
 
     def __init__(
         self,
@@ -151,7 +131,7 @@ class OnboardingBubble(QWidget):
         if mode not in ("intro", "patrol"):
             raise ValueError(f"unknown onboarding mode: {mode!r}")
         self.mode = mode
-        # 埋点用的结束方式；None = 尚未结束
+
         self.outcome: str | None = None
         self._done = False
         self._pet = pet_window
@@ -169,10 +149,10 @@ class OnboardingBubble(QWidget):
         self._owner_registered = False
         self._registration_in_progress = False
 
-        # 拖动状态
+
         self._drag_offset = None
 
-        # 内部容器（承载 QSS 圆角背景）
+
         self._container = QWidget(self)
         self._container.setObjectName("onboardingBubble")
         self._container.setGeometry(0, 0, _BUBBLE_WIDTH, _BUBBLE_HEIGHT)
@@ -182,7 +162,7 @@ class OnboardingBubble(QWidget):
         self._layout.setContentsMargins(20, 12, 20, 12)
         self._layout.setSpacing(6)
 
-        # 引导文字：固定气泡尺寸内可滚动，避免风险告知被裁切。
+
         self._label = QLabel()
         self._label.setWordWrap(True)
         self._label.setAlignment(Qt.AlignCenter)
@@ -208,31 +188,28 @@ class OnboardingBubble(QWidget):
         )
         self._layout.addWidget(self._preview)
 
-        # 按钮区
+
         self._button_layout = QHBoxLayout()
         self._button_layout.setSpacing(8)
         self._layout.addLayout(self._button_layout)
 
-        # Step 3 预览模式下插入的额外间距（其他步骤移除）
+
         self._step3_spacer = None
 
         self._buttons: list[QPushButton] = []
 
-        # 定位：居中于桌宠上方
+
         self._sync_position()
 
-        # 监听桌宠移动
+
         self._pet.installEventFilter(self)
 
-        # 显示第一步
+
         if mode == "intro":
             self._show_step(0)
         else:
             self._show_step(2 if start_step == 2 else 1)
 
-    # ------------------------------------------------------------------ #
-    # 定位与绑定
-    # ------------------------------------------------------------------ #
 
     def _sync_position(self) -> None:
         """气泡居中于桌宠上方：中心线与桌宠中心线对齐，
@@ -259,7 +236,7 @@ class OnboardingBubble(QWidget):
             current_pos = event.globalPosition().toPoint()
             new_bubble_pos = current_pos - self._drag_offset
             self.move(new_bubble_pos)
-            # 同步移动桌宠
+
             pet_x = new_bubble_pos.x() + _BUBBLE_WIDTH // 2 - self._pet.width() // 2
             # Step 3 含摄像头预览，气泡高度会动态增大，不能继续使用
             # 默认的 140px 高度，否则拖动时桌宠会钻进预览框下方。
@@ -270,16 +247,13 @@ class OnboardingBubble(QWidget):
         if event.button() == Qt.LeftButton:
             self._drag_offset = None
 
-    # ------------------------------------------------------------------ #
-    # 步骤控制
-    # ------------------------------------------------------------------ #
 
     def _clear_buttons(self) -> None:
         """清除当前所有按钮。"""
         for btn in self._buttons:
             self._button_layout.removeWidget(btn)
-            # deleteLater() 要等事件循环处理；先隐藏可避免步骤切换时旧、新
-            # 按钮短暂叠在同一位置。
+
+
             btn.hide()
             btn.deleteLater()
         self._buttons.clear()
@@ -299,15 +273,15 @@ class OnboardingBubble(QWidget):
         self._step = step
         self._clear_buttons()
 
-        # 非 Step 3 时移除预览模式下的额外间距
+
         if step != 3 and self._step3_spacer is not None:
             self._layout.removeItem(self._step3_spacer)
             self._step3_spacer = None
 
         text = _STEP_TEXTS.get(step, "")
         self._label.setText(text)
-        # QScrollArea 不会为 word-wrap 标签自动计算超出视口的内容高度；
-        # 显式按固定宽度测量全文，才能既保留完整内容又出现滚动条。
+
+
         content_width = _BUBBLE_WIDTH - 52
         content_height = self._label.fontMetrics().boundingRect(
             0,
@@ -335,7 +309,7 @@ class OnboardingBubble(QWidget):
             self._preview.setHidden(False)
             self._preview.setText("摄像头启动中...")
             self._add_button("拍一张", self._on_capture)
-            # Step 3: 在预览和按钮之间插入额外间距，避免拥挤
+
             if hasattr(self, "_step3_spacer") and self._step3_spacer is not None:
                 self._layout.removeItem(self._step3_spacer)
             from PySide6.QtWidgets import QSizePolicy, QSpacerItem
@@ -345,14 +319,14 @@ class OnboardingBubble(QWidget):
             self._layout.insertSpacerItem(
                 self._layout.indexOf(self._button_layout), self._step3_spacer,
             )
-            # 动态计算气泡高度 = 边距 + label + preview + 间距 + 按钮 + 额外底部留白
+
             extra_bottom = 16
             _h = (
-                24  # content margins (12 top + 12 bottom)
+                24
                 + self._text_scroll.height()
-                + 6   # label-preview spacing
+                + 6
                 + _PREVIEW_H
-                + 20  # spacer above buttons
+                + 20
                 + self._button_layout.sizeHint().height()
                 + extra_bottom
             )
@@ -362,7 +336,7 @@ class OnboardingBubble(QWidget):
             self.preview_requested.emit()
         elif step == 4:
             self._preview.setHidden(True)
-            # 恢复默认气泡高度
+
             self.setFixedSize(_BUBBLE_WIDTH, _BUBBLE_HEIGHT)
             self._container.setGeometry(0, 0, _BUBBLE_WIDTH, _BUBBLE_HEIGHT)
             self._sync_position()
@@ -382,9 +356,6 @@ class OnboardingBubble(QWidget):
         else:
             self._show_step(next_step)
 
-    # ------------------------------------------------------------------ #
-    # 步骤回调
-    # ------------------------------------------------------------------ #
 
     def _on_intro_acknowledged(self) -> None:
         """首次介绍：点「知道了」。"""
@@ -451,8 +422,8 @@ class OnboardingBubble(QWidget):
             return
         self._done = True
         self.outcome = outcome
-        # 形象路径为空（MVP 使用默认形象）
-        self._step = 4  # 保持旧语义：closeEvent 不再把已完成流程误报为“跳过”
+
+        self._step = 4
         self.finished.emit("")
         self.close()
 
@@ -474,9 +445,6 @@ class OnboardingBubble(QWidget):
             )
             self._preview.setPixmap(scaled)
 
-    # ------------------------------------------------------------------ #
-    # 事件
-    # ------------------------------------------------------------------ #
 
     def closeEvent(self, event) -> None:  # noqa: N802
         """关闭事件：尚未结束时也发射 finished；已到完成页的保留真实结果。"""

@@ -38,7 +38,7 @@ def _hold_lock(path, ready, release):
 
 @pytest.mark.parametrize("crash", [False, True])
 def test_native_lock_rejects_second_process_and_releases_on_exit(tmp_path: Path, crash: bool):
-    # Runs the real backend on either POSIX or Windows (spawn, no fork inheritance).
+
     context = multiprocessing.get_context("spawn")
     ready = context.Event()
     stop_read, stop_write = context.Pipe(duplex=False)

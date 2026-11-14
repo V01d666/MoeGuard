@@ -13,20 +13,16 @@
 
 from __future__ import annotations
 
-# ---------------------------------------------------------------------------
-# 颜色（蓝白 / 守护蓝 / 安全红）
-# ---------------------------------------------------------------------------
+WINDOW_BG = "#F5F9FF"
+PANEL_BG = "#FFFFFF"
+SECTION_BG = "#EAF3FF"
+BORDER = "#D9E7F7"
+BORDER_STRONG = "#B9D2EE"
 
-WINDOW_BG = "#F5F9FF"           # 淡蓝白窗口背景
-PANEL_BG = "#FFFFFF"            # 卡片 / 输入面板背景
-SECTION_BG = "#EAF3FF"          # 浅蓝分区背景
-BORDER = "#D9E7F7"              # 常规边框
-BORDER_STRONG = "#B9D2EE"       # 略深边框（悬停 / 分隔）
+TEXT_PRIMARY = "#19324D"
+TEXT_SECONDARY = "#607890"
 
-TEXT_PRIMARY = "#19324D"        # 深蓝灰主文字
-TEXT_SECONDARY = "#607890"      # 次级说明文字
-
-ACCENT = "#2F7DD1"              # 萌卫守护蓝（普通强调按钮）
+ACCENT = "#2F7DD1"
 ACCENT_HOVER = "#246CBD"
 ACCENT_PRESSED = "#1D5BA2"
 
@@ -39,19 +35,16 @@ PATROL_BANNER_TEXT = "#FFFFFF"
 
 BUBBLE_BG_RGBA = (255, 255, 255, 245)
 BUBBLE_BORDER_RGBA = (185, 210, 238, 170)
-BUBBLE_BG = f"rgba{BUBBLE_BG_RGBA}"        # 气泡背景（引导 / 消息共用）
-BUBBLE_BORDER = f"rgba{BUBBLE_BORDER_RGBA}"    # 气泡边框
+BUBBLE_BG = f"rgba{BUBBLE_BG_RGBA}"
+BUBBLE_BORDER = f"rgba{BUBBLE_BORDER_RGBA}"
 PREVIEW_PLACEHOLDER_BG = "#17324D"            # 摄像头预览占位（深蓝灰）
 PREVIEW_PLACEHOLDER_TEXT = "#AFC8E2"
 
-# ---------------------------------------------------------------------------
-# 尺寸（圆角 / 间距，单位 px）
-# ---------------------------------------------------------------------------
 
-RADIUS_SMALL = 6      # 输入控件 / 小按钮
-RADIUS_MEDIUM = 8     # 按钮 / 分区卡片
-RADIUS_LARGE = 12     # 消息气泡
-RADIUS_XLARGE = 16    # 引导气泡
+RADIUS_SMALL = 6
+RADIUS_MEDIUM = 8
+RADIUS_LARGE = 12
+RADIUS_XLARGE = 16
 
 SPACE_SMALL = 6
 SPACE_MEDIUM = 10
@@ -60,9 +53,6 @@ CARD_MARGINS = (14, 12, 14, 12)
 
 CONTROL_MIN_HEIGHT = 26  # 输入控件 / 按钮最小高度（DPI 友好，不锁死固定高度）
 
-# ---------------------------------------------------------------------------
-# 字体：系统字体族，Windows 优先 Segoe UI，不打包字体文件
-# ---------------------------------------------------------------------------
 
 FONT_FAMILY = '"Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif'
 FONT_SIZE_NORMAL = 13
@@ -76,11 +66,6 @@ def font_css(size: int = FONT_SIZE_NORMAL, *, bold: bool = False) -> str:
     return f"font-family: {FONT_FAMILY}; font-size: {size}px; font-weight: {weight};"
 
 
-# ---------------------------------------------------------------------------
-# 共享按钮片段：普通 / 强调 / 危险三级
-# ---------------------------------------------------------------------------
-
-
 def button_qss(role: str = "normal") -> str:
     """生成单个按钮角色的 QSS（供对象级 stylesheet 使用）。
 
@@ -88,13 +73,13 @@ def button_qss(role: str = "normal") -> str:
     """
     if role == "accent":
         bg, hover, pressed, fg = ACCENT, ACCENT_HOVER, ACCENT_PRESSED, "#FFFFFF"
-        # Same 1px box as a bordered "normal" button (the background shows
-        # through), so mixed rows line up instead of differing by 2px.
+
+
         border = "1px solid transparent"
     elif role == "danger":
         bg, hover, pressed, fg = DANGER, DANGER_HOVER, DANGER_PRESSED, "#FFFFFF"
-        # Same 1px box as a bordered "normal" button (the background shows
-        # through), so mixed rows line up instead of differing by 2px.
+
+
         border = "1px solid transparent"
     else:
         bg, hover, pressed, fg = PANEL_BG, SECTION_BG, BORDER, TEXT_PRIMARY
@@ -113,22 +98,12 @@ def button_qss(role: str = "normal") -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# 气泡（引导气泡与桌宠消息气泡共享规范）
-# ---------------------------------------------------------------------------
-
-
 def bubble_qss(radius: int = RADIUS_XLARGE) -> str:
     """气泡背景 QSS（应用于带 objectName 的容器）。"""
     return (
         f"background: {BUBBLE_BG}; border: 1px solid {BUBBLE_BORDER};\n"
         f"border-radius: {radius}px;"
     )
-
-
-# ---------------------------------------------------------------------------
-# 模态对话框（设置 / 证据）作用域 QSS
-# ---------------------------------------------------------------------------
 
 
 def flat_card_qss(scope: str) -> str:

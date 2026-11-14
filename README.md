@@ -35,6 +35,7 @@
 ## 现在的萌卫
 
 - 🎨 **桌宠工坊**：一段文字或一张图就能生成立绘，选中心仪的那张再让它动起来；除了待机，想要哪些动作随你挑
+- 🎚️ **各有节奏**：在设置里调整当前角色的播放帧率，切换角色或重启后仍记得各自的选择
 - 🔁 **常换常新**：装好的角色随时补动作、换动作、改名字，甚至整个重新设计，旧版本都会留着
 - ⏳ **不用干等**：进度和预计时间一目了然，走开也没关系，做好了托盘和桌宠都会喊你回来
 - 📦 **随身带走**：角色能导出成文件夹备份，换台电脑也能原样导入
@@ -55,11 +56,11 @@
 只养桌宠用不到摄像头；第一次开启看家时，萌卫会先讲清楚风险、征得你的同意
 
 <details>
-<summary>🔎 文件校验（v0.4.2）</summary>
+<summary>🔎 文件校验（v0.5.0）</summary>
 
 | 文件 | 字节数 | SHA-256 |
 | --- | ---: | --- |
-| `MoeGuard-Setup.exe` | 206874814 | `b37c11a1672f54f792b8954e5468b56cce88322f311f5df63eea823f02d0b866` |
+| `MoeGuard-Setup.exe` | 212972057 | `ba468c1a1dba5266b44638d4d338f5727824cca8c3c94c576fea788b07ee0bba` |
 
 </details>
 
@@ -73,7 +74,7 @@ git clone https://github.com/V01d666/MoeGuard.git
 cd MoeGuard
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
-.\start_moeguard.bat
+.\scripts\windows\start_moeguard.bat
 ```
 
 </details>
@@ -87,6 +88,15 @@ py -3.12 -m venv .venv
 完整更新记录见 [Releases](https://github.com/V01d666/MoeGuard/releases)
 
 <details open>
+<summary><strong>V0.5</strong></summary>
+
+| 日期 | 版本 | 更新内容 |
+| :--: | :-- | :-- |
+| `11-14` | 🚀 [**v0.5.0**](https://github.com/V01d666/MoeGuard/releases/tag/v0.5.0) | ✨ 工坊生成与交付体验升级，取消后保留候选，安装时界面更顺畅<br>✨ 逐角色记忆播放帧率<br>🔧 改善窗口恢复、动作尺度与透明预览，修复 Windows 空闲内存持续增长 |
+
+</details>
+
+<details>
 <summary><strong>V0.4</strong></summary>
 
 | 日期 | 版本 | 更新内容 |

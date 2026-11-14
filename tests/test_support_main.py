@@ -97,7 +97,7 @@ def test_startup_connects_off_ui_thread_updates_open_settings_and_reuses_session
         lambda *_: delivered_on.append(threading.get_ident())
     )
     app.ready.emit()
-    app._service_connection.retry()  # Coalesced with startup.
+    app._service_connection.retry()
     app._on_open_settings()
     dialog = app._settings_dialog
     assert app._service_connection.busy
@@ -112,14 +112,14 @@ def test_startup_connects_off_ui_thread_updates_open_settings_and_reuses_session
     assert dialog.connect_service_button.isHidden()
     assert "立绘 2 次 · 动作 3 次" in dialog.support_id_edit.placeholderText()
     assert sessions.load() is not None
-    assert len(app._summary_calls) == 1  # Connecting and the balance are one request.
+    assert len(app._summary_calls) == 1
     dialog.reject()
     qt_app.processEvents()
 
     restarted, _, _ = _automatic_app(tmp_path, monkeypatch, enroll)
     restarted.ready.emit()
     _wait_connection(restarted, qt_app)
-    assert len(calls) == 1  # The stored session is reused; no enrollment.
+    assert len(calls) == 1
     assert len(restarted._summary_calls) == 1
     assert restarted._support_id_provider() == _automatic_enrollment().account_id
 
@@ -242,7 +242,7 @@ def test_service_surfaces_share_one_balance_and_refetch_only_when_stale(
     workbench = _factory(app)()
     credit = _credit_factory(app)()
     _wait_connection(app, qt_app)
-    assert len(app._summary_calls) == 1  # Fresh cache: opening costs nothing.
+    assert len(app._summary_calls) == 1
     assert workbench.account_summary_label.text() == _BALANCE_TEXT
     assert workbench.account_refresh_button.isHidden()
     assert workbench.support_id_edit.text() == _automatic_enrollment().account_id
@@ -254,7 +254,7 @@ def test_service_surfaces_share_one_balance_and_refetch_only_when_stale(
     now[0] += 5 * 60
     reopened = _factory(app)()
     _wait_connection(app, qt_app)
-    assert len(app._summary_calls) == 2  # Stale after five minutes.
+    assert len(app._summary_calls) == 2
     reopened.close()
 
 
@@ -270,7 +270,7 @@ def test_workbench_opened_before_startup_finishes_follows_the_connection(
     app, _, _ = _automatic_app(tmp_path, monkeypatch, enroll)
     app.ready.emit()
     dialog = _factory(app)()
-    assert dialog.prepare_button.isEnabled()  # Generating connects on demand.
+    assert dialog.prepare_button.isEnabled()
     assert dialog.account_summary_label.text() == "生成次数：正在获取…"
     assert dialog.support_id_row.isHidden()
     release.set()
@@ -303,7 +303,7 @@ def test_offline_retry_is_event_driven_and_rate_limited(
     connection._retry_timer.stop()
     assert connection.offline and len(attempts) == 1
 
-    dialog = _factory(app)()  # Opening a surface retries, at most every 30 s.
+    dialog = _factory(app)()
     _wait_connection(app, qt_app)
     connection._retry_timer.stop()
     assert len(attempts) == 1
@@ -336,10 +336,10 @@ def test_credit_hint_beside_generate_button_names_the_shortfall(
     dialog.candidate_count.setValue(2)
     assert not dialog.credit_hint_row.isHidden()
     assert dialog.credit_hint_label.text() == "立绘次数不足：需要 2 次，剩 1 次"
-    assert dialog.prepare_button.isEnabled()  # A hint, not a gate.
+    assert dialog.prepare_button.isEnabled()
     dialog.candidate_count.setValue(1)
     assert dialog.credit_hint_row.isHidden()
-    dialog.input_tabs.setCurrentIndex(1)  # An uploaded image costs nothing.
+    dialog.input_tabs.setCurrentIndex(1)
     dialog.candidate_count.setValue(4)
     assert dialog.credit_hint_row.isHidden()
     dialog._result_saved = True
@@ -382,7 +382,7 @@ def qt_app(monkeypatch) -> Iterator[QApplication]:
 
     def initialize(app, *args, **kwargs):
         original_init(app, *args, **kwargs)
-        apps.append(app)  # Keep QObject owners alive until their workers finish.
+        apps.append(app)
 
     def start(thread):
         result = original_start(thread)
@@ -392,8 +392,8 @@ def qt_app(monkeypatch) -> Iterator[QApplication]:
 
     monkeypatch.setattr(MoeGuardApp, "__init__", initialize)
     monkeypatch.setattr(threading.Thread, "start", start)
-    # These tests exercise connection and UI wiring, not live HTTP endpoints.
-    # Individual connection scenarios override enrollment below as needed.
+
+
     monkeypatch.setattr(HttpRoleServiceTransport, "enroll", lambda *_args: _automatic_enrollment())
     monkeypatch.setattr(HttpRoleServiceTransport, "announcements", lambda _self: ())
     monkeypatch.setattr(
@@ -434,6 +434,101 @@ def _factory(app: MoeGuardApp):
     factory = app._custom_role_workbench_factory
     assert factory is not None
     return factory
+
+
+def test_install_activation_does_not_lock_workbench_with_success_modal(
+    tmp_path: Path, qt_app, monkeypatch
+) -> None:
+    from PySide6.QtCore import Qt
+
+    from moeguard.roles import PackageKey
+
+    app = MoeGuardApp()
+    configure_role_workbench(
+        app, environ={}, storage_root=tmp_path / "workbench",
+        role_library=RoleLibrary(tmp_path / "roles"),
+        service_config_path=tmp_path / "missing-role-service.json",
+    )
+    dialog = _factory(app)()
+    activated = []
+    monkeypatch.setattr(app, "activate_managed_role_async", lambda key, done, **kw:
+                        QTimer.singleShot(0, lambda: done(True, "已切换为测试桌宠")))
+    monkeypatch.setattr(dialog, "record_role_activated", lambda: activated.append(True))
+    modal_windows = []
+
+    def inspect_modal():
+        modal = QApplication.activeModalWidget()
+        if modal is not None:
+            modal_windows.append(modal.windowTitle())
+            modal.accept()
+
+    dialog.show()
+    QTimer.singleShot(0, inspect_modal)
+    dialog.install_requested.emit(PackageKey("installed-pet", 1))
+    qt_app.processEvents()
+    try:
+        assert activated == [True]
+        assert modal_windows == [], "success dialog blocked the workbench after activation"
+        assert QApplication.activeModalWidget() is None
+        assert dialog.windowFlags() & Qt.WindowCloseButtonHint
+        assert "已切换为测试桌宠" in dialog.status.text()
+        assert dialog.close()
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("success", [True, False])
+def test_workbench_activation_stays_guarded_until_async_completion(
+    tmp_path, qt_app, monkeypatch, success,
+):
+    from moeguard.roles import PackageKey
+
+    app = MoeGuardApp()
+    configure_role_workbench(
+        app, environ={}, storage_root=tmp_path / "workbench",
+        role_library=RoleLibrary(tmp_path / "roles"),
+        service_config_path=tmp_path / "missing-role-service.json",
+    )
+    dialog = _factory(app)()
+    calls, activated, failures = [], [], []
+    monkeypatch.setattr(app, "activate_managed_role", lambda *a, **kw: (True, "sync"))
+    monkeypatch.setattr(
+        app, "activate_managed_role_async", lambda key, done, **kw: calls.append(done),
+    )
+    monkeypatch.setattr(dialog, "record_role_activated", lambda: activated.append(True))
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **kw: None)
+    monkeypatch.setattr(QMessageBox, "critical", lambda *a, **kw: failures.append(a[2]))
+    dialog.show()
+    try:
+        dialog.install_requested.emit(PackageKey("installed-pet", 1))
+        assert len(calls) == 1
+        assert dialog.has_running_task()
+        from moeguard.cloud.role_workbench import PackageResult
+        dialog._package_result = PackageResult(tmp_path / "unused-package", 0.0)
+        dialog._result_saved = True
+        dialog._worker_finished()  # Worker's queued finish must not unlock activation.
+        assert not dialog.install_button.isEnabled()
+        starts = []
+        monkeypatch.setattr(dialog, "_confirm_result_use", lambda *a: True)
+        monkeypatch.setattr(dialog, "_start_worker", lambda *a, **kw: starts.append(True))
+        dialog._request_install()
+        assert starts == []
+        assert not dialog.close()
+        dialog.reject()
+        assert dialog.isVisible()
+        dialog.install_requested.emit(PackageKey("installed-pet", 1))
+        assert len(calls) == 1
+        assert not dialog.cancel_task_button.isVisible()
+        assert activated == []
+        calls[0](success, "异步切换结果")
+        assert not dialog.has_running_task()
+        assert activated == ([True] if success else [])
+        assert failures == ([] if success else ["异步切换结果"])
+        assert QApplication.activeModalWidget() is None
+        assert dialog.close()
+    finally:
+        dialog._result_saved = True
+        dialog.close()
 
 
 def _credit_factory(app: MoeGuardApp):
@@ -700,7 +795,7 @@ def test_configured_origin_opens_an_online_workbench_without_a_binding_step(
     assert dialog._service_client is not None
     assert dialog.service_bar is None
     assert dialog.prepare_button.isEnabled() is True
-    assert dialog.support_id_row.isHidden()  # Until the first request enrolls.
+    assert dialog.support_id_row.isHidden()
     dialog.close()
 
 
@@ -855,9 +950,6 @@ def _validate_event(event_name: str, properties: dict[str, object]) -> None:
     )
 
 
-# -- v0.4.0 app heartbeats ----------------------------------------------------
-
-
 class _FakeReporter:
     def __init__(self) -> None:
         self.events: list[tuple[str, dict[str, object]]] = []
@@ -946,7 +1038,7 @@ def test_pilot_build_wires_one_shared_tracker_and_request_timing(
     assert updater_module._feed_observer == telemetry.latency.observe
     assert telemetry.reporter.tracker is tracker
     assert telemetry.record_daily_active() is True
-    assert outbox.exists()  # Undelivered events wait in the shared outbox.
+    assert outbox.exists()
     assert (tmp_path / "workbench" / "state" / "daily-active.json").exists()
     telemetry.shutdown()
 

@@ -1,12 +1,4 @@
-"""系统托盘：常驻后台、快捷操作入口。
-
-菜单：手动值守切换 / 完全免打扰开关 / 设置 / 查看证据 / 退出。
-桌宠应用关闭窗口不退出，通过托盘常驻。
-
-M4 增强：
-- 绑定 QSystemTrayIcon.activated 信号，左键双击切换桌宠可见性。
-- 新增 tray_activated 信号，供 app 层接线。
-"""
+'系统托盘：常驻后台、快捷操作入口。'
 
 from __future__ import annotations
 
@@ -31,16 +23,16 @@ class TrayIcon(QObject):
         tray_activated: 托盘图标被激活（QSystemTrayIcon.ActivationReason）
     """
 
-    toggle_patrol = Signal(bool)  # True=进入手动值守, False=回到陪伴
-    toggle_disturb_free = Signal(bool)  # 完全免打扰开关（隐藏桌宠）
+    toggle_patrol = Signal(bool)
+    toggle_disturb_free = Signal(bool)
     open_settings = Signal()
     open_custom_role_workbench = Signal()
     open_mailbox = Signal()
     open_security_setup = Signal()
     open_evidence = Signal()
     quit_requested = Signal()
-    tray_activated = Signal(int)  # QSystemTrayIcon.ActivationReason
-    # 托盘气泡被点击；参数是该气泡 show_message 时的 tag（空 = 普通提示）
+    tray_activated = Signal(int)
+
     message_clicked = Signal(str)
 
     def __init__(
@@ -59,7 +51,7 @@ class TrayIcon(QObject):
         self._message_tag = ""
         self._tray.messageClicked.connect(self._on_message_clicked)
 
-        # 绑定 activated 信号 -> 转发 tray_activated + 左键双击处理
+
         self._tray.activated.connect(self._on_activated)
 
         menu = QMenu(parent)
@@ -100,7 +92,7 @@ class TrayIcon(QObject):
         self._act_evidence.triggered.connect(self.open_evidence)
         self._act_quit.triggered.connect(self.quit_requested)
 
-        # v0.4.1：桌宠工坊放最前（不可用时隐藏，Qt 会折叠多余的分隔线）。
+
         menu.addAction(self._act_custom_role)
         menu.addAction(self._act_mailbox)
         menu.addSeparator()
@@ -157,7 +149,7 @@ class TrayIcon(QObject):
         self._act_companion.setEnabled(on_patrol)
 
     def set_custom_role_workbench_available(self, available: bool) -> None:
-        """仅在 v0.2 客户端注入工作台后显示直达入口。"""
+        '仅在 客户端注入工作台后显示直达入口。'
         self._act_custom_role.setVisible(bool(available))
 
     def set_mailbox_available(self, available: bool) -> None:
