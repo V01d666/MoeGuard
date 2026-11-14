@@ -26,7 +26,7 @@
 
 Then come play with it on the [MoeGuard website](https://moeproject.net/en/) first, and [take it home](#jump-right-in) if you like it!
 
-Write a short description or drop in a picture, and you get a pet that's truly yours, animations included. Bored of the look? Give it a makeover whenever you like
+Write a short description or drop in a picture, and you get a pet that's truly yours, animations included. This update focuses on better character art and motion with less waiting. Bored of the look? Give it a makeover whenever you like
 
 Most of the time it hangs out at the edge of your screen while you work (or slack off), reacting when you poke it or pick it up. Lock your screen and walk away, and, only with your explicit consent, it turns on the camera and keeps an eye on things. The moment you're back, the camera goes off and it tells you what happened while you were gone. Who says pets just freeload? (•̀ᴗ•́)و
 
@@ -34,7 +34,7 @@ It isn't a security camera dressed up as a pet. Think of it as a little partner 
 
 ## MoeGuard today
 
-- 🎨 **Pet Workshop**: turn a few words or a single image into character art, pick your favorite, then bring it to life; beyond the idle loop, you choose which actions it gets
+- 🎨 **Pet Workshop**: upgraded character-art and action generation, focusing on finer character detail, better motion and faster results; start with a few words or an image, pick your favorite artwork, then choose its actions
 - 🎚️ **Their own pace**: adjust playback FPS for the current character in Settings; each character keeps its choice across switches and restarts
 - 🔁 **Always fresh**: add or swap actions, rename, or redesign the whole look anytime, with every earlier version kept safe
 - ⏳ **No babysitting**: see real progress and a time estimate, then walk away; the tray and your pet will call you back when it's done
@@ -92,7 +92,7 @@ See [Releases](https://github.com/V01d666/MoeGuard/releases) for the full releas
 
 | Date | Version | Highlights |
 | :--: | :-- | :-- |
-| `11-14` | 🚀 [**v0.5.0**](https://github.com/V01d666/MoeGuard/releases/tag/v0.5.0) | ✨ Improved Workshop generation and delivery; cancellation keeps candidates, and installation stays responsive<br>✨ Playback FPS remembered per character<br>🔧 Better window restoration, action scale and transparent previews; fix growing idle memory use on Windows |
+| `11-14` | 🚀 [**v0.5.0**](https://github.com/V01d666/MoeGuard/releases/tag/v0.5.0) | ✨ Better character-art and action generation, with faster results<br>✨ Cancellation keeps candidates, installation stays responsive, and each character remembers its FPS<br>🔧 Better window restoration, action scale and transparent previews; fix growing idle memory use on Windows |
 
 </details>
 
