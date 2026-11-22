@@ -1,0 +1,48 @@
+[package]
+name = "moeguard-desktop"
+version = "0.6.0"
+edition = "2021"
+rust-version = "1.89"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+catalog-loopback = []
+revision-loopback = ["dep:png", "dep:semver", "dep:uuid", "zip/deflate-flate2-zlib-rs"]
+legacy-workshop = ["dep:png", "dep:semver", "dep:uuid", "dep:windows", "dep:windows-core", "windows-sys/Win32_Security_Cryptography", "windows-sys/Win32_Storage_FileSystem", "zip/deflate-flate2-zlib-rs"]
+pet-gtk-probe = ["revision-loopback", "dep:gtk", "dep:png", "tauri/unstable"]
+native-tray = ["tauri/tray-icon", "dep:png", "windows-sys/Win32_Graphics_Gdi", "windows-sys/Win32_UI_HiDpi"]
+pet-win32 = ["native-tray", "windows-sys/Win32_System_LibraryLoader", "windows-sys/Win32_UI_Controls_Dialogs", "windows-sys/Win32_UI_Input_KeyboardAndMouse", "zip/deflate-flate2-zlib-rs"]
+patrol-worker = ["legacy-workshop", "pet-win32", "windows-sys/Win32_Security", "windows-sys/Win32_System_JobObjects", "windows-sys/Win32_System_RemoteDesktop", "windows-sys/Win32_System_Threading"]
+windows-update = ["dep:semver", "dep:toml", "dep:velopack", "reqwest/blocking"]
+
+[dependencies]
+base64 = "0.23"
+png = { version = "0.18", optional = true }
+reqwest = { version = "0.13.5", default-features = false, features = ["native-tls"] }
+semver = { version = "1", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+tauri = { version = "2", features = [] }
+tempfile = "3.27"
+tokio = { version = "1", features = ["macros", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+zip = { version = "9.7.3", default-features = false }
+uuid = { version = "1", features = ["v4"], optional = true }
+zeroize = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { version = "0.18", optional = true }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Storage_FileSystem"] }
+
+[target.'cfg(windows)'.dependencies]
+toml = { version = "1", optional = true }
+velopack = { version = "=1.2.161", default-features = false, features = ["public-utils"], optional = true }
+windows = { version = "0.62.2", optional = true, features = ["Win32_Graphics_Imaging", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-core = { version = "0.62.2", optional = true }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

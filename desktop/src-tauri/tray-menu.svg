@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="432" height="72" viewBox="0 0 216 36">
+  <!-- Tabler Icons v3.34.1, MIT. See NOTICE. -->
+  <g transform="translate(0)">
+    <rect x="4" y="4" width="28" height="28" rx="8" fill="#e4f0ff"/>
+    <g transform="translate(7 7) scale(.916667)" fill="none" stroke="#255c96" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M16 18a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2zm0 -12a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2zm-7 12a6 6 0 0 1 6 -6a6 6 0 0 1 -6 -6a6 6 0 0 1 -6 6a6 6 0 0 1 6 6z"/>
+    </g>
+  </g>
+  <g transform="translate(36)">
+    <rect x="4" y="4" width="28" height="28" rx="8" fill="#e4f0ff"/>
+    <g transform="translate(7 7) scale(.916667)" fill="none" stroke="#255c96" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z"/>
+      <path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"/>
+    </g>
+  </g>
+  <g transform="translate(72)">
+    <rect x="4" y="4" width="28" height="28" rx="8" fill="#e4f0ff"/>
+    <g transform="translate(7 7) scale(.916667)" fill="none" stroke="#255c96" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 7a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-10z"/>
+      <path d="M3 7l9 6l9 -6"/>
+    </g>
+  </g>
+  <g transform="translate(108)">
+    <rect x="4" y="4" width="28" height="28" rx="8" fill="#dff2e9"/>
+    <g transform="translate(7 7) scale(.916667)" fill="none" stroke="#176756" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M15 10l4.553 -2.276a1 1 0 0 1 1.447 .894v6.764a1 1 0 0 1 -1.447 .894l-4.553 -2.276v-4z"/>
+      <path d="M3 6m0 2a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2z"/>
+    </g>
+  </g>
+  <g transform="translate(144)">
+    <rect x="4" y="4" width="28" height="28" rx="8" fill="#fae4ea"/>
+    <g transform="translate(7 7) scale(.916667)" fill="none" stroke="#a6324a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 3l18 18"/>
+      <path d="M15 11v-1l4.553 -2.276a1 1 0 0 1 1.447 .894v6.764a1 1 0 0 1 -.675 .946"/>
+      <path d="M10 6h3a2 2 0 0 1 2 2v3m0 4v1a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2v-8a2 2 0 0 1 2 -2h1"/>
+    </g>
+  </g>
+  <g transform="translate(180)">
+    <rect x="4" y="4" width="28" height="28" rx="8" fill="#f7e7ee"/>
+    <g transform="translate(7 7) scale(.916667)" fill="none" stroke="#9c425c" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 8v-2a2 2 0 0 0 -2 -2h-7a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2 -2v-2"/>
+      <path d="M9 12h12l-3 -3"/>
+      <path d="M18 15l3 -3"/>
+    </g>
+  </g>
+</svg>

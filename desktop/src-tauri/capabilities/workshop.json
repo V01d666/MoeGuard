@@ -1,0 +1,6 @@
+{
+  "identifier": "workshop",
+  "description": "Workshop checkpoints, official role downloads, and close coordination",
+  "windows": ["workshop"],
+  "permissions": ["allow-load-workshop", "allow-save-workshop", "allow-catalog-inventory", "allow-catalog-download", "allow-catalog-cancel", "allow-workshop-action-preview", "allow-workshop-revision", "allow-open-redemption-page", "allow-decode-workshop-picture", "allow-load-ui-locale", "core:event:allow-listen", "core:event:allow-unlisten", "core:window:allow-destroy"]
+}

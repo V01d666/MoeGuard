@@ -1,0 +1,6 @@
+{
+  "identifier": "settings",
+  "description": "Settings, workshop navigation, support ID, official links and patrol setup",
+  "windows": ["settings"],
+  "permissions": ["allow-load-ui-locale", "allow-save-ui-locale", "allow-load-pet-hotkey", "allow-save-pet-hotkey", "allow-open-workshop", "allow-settings-support-id", "allow-open-redemption-page", "allow-open-project-repository", "allow-patrol-settings", "allow-settings-role-transfer", "allow-settings-pet", "allow-settings-update", "allow-capture-pet-hotkey", "core:event:allow-listen", "core:event:allow-unlisten", "core:window:allow-close"]
+}

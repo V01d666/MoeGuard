@@ -53,7 +53,7 @@ class OwnerProfileStore:
                 tmp_path.unlink(missing_ok=True)
             raise
 
-    def load(self) -> list[np.ndarray]:
+    def load(self, *, quarantine: bool = True) -> list[np.ndarray]:
         """解密加载主人特征；坏档案会隔离并退回未注册状态。"""
         self._last_load_error = None
         if not self._path.exists():
@@ -74,11 +74,13 @@ class OwnerProfileStore:
             return embeddings
         except Exception as exc:
             self._last_load_error = str(exc)
-            quarantine = self._path.with_name(
+            if not quarantine:
+                return []
+            quarantine_path = self._path.with_name(
                 f"{self._path.name}.corrupt-{uuid.uuid4().hex[:8]}"
             )
             try:
-                os.replace(self._path, quarantine)
+                os.replace(self._path, quarantine_path)
             except OSError:
                 # 无法隔离时仍 fail-closed；不得让损坏档案进入识别路径。
                 pass

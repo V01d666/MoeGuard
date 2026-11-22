@@ -1,0 +1,26 @@
+{
+  "name": "moeguard-desktop",
+  "version": "0.6.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "build": "tsc --noEmit && vite build",
+    "build:windows": "tauri build --no-bundle --config src-tauri/tauri.candidate.conf.json --features legacy-workshop,pet-win32,windows-update -- --locked",
+    "build:windows:patrol": "tauri build --no-bundle --config src-tauri/tauri.candidate.conf.json --features patrol-worker,windows-update -- --locked",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.mjs",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.5",
+    "react": "19.2.9",
+    "react-dom": "19.2.9"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.6",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3",
+    "vite": "7.3.8"
+  }
+}

@@ -1,0 +1,143 @@
+[
+  {
+    "id": "whale",
+    "role_id": "pet-8af04aee88f590ed",
+    "name": "鲸鱼娘",
+    "actions": [
+      "click_reaction",
+      "dragging",
+      "idle",
+      "peek_left"
+    ],
+    "bytes": 11318036,
+    "sha256": "d5cadaed440eb565cfa3f4eef375d908adb0b902c13924825f29ba022640c67e",
+    "bundled": true
+  },
+  {
+    "id": "lumen",
+    "role_id": "lumen",
+    "name": "Lumen",
+    "actions": [
+      "click_reaction",
+      "dragging",
+      "idle",
+      "notice",
+      "patrol",
+      "peek_left",
+      "peek_right",
+      "sit_down",
+      "welcome"
+    ],
+    "bytes": 14289211,
+    "sha256": "3e2d4c32d9da710990739de95f2a77e481b0efbedb02f563cb7c3fc19ad6b9f4",
+    "bundled": false
+  },
+  {
+    "id": "poppy",
+    "role_id": "poppy",
+    "name": "Poppy",
+    "actions": [
+      "click_reaction",
+      "dragging",
+      "idle",
+      "notice",
+      "patrol",
+      "peek_left",
+      "peek_right",
+      "sit_down",
+      "welcome"
+    ],
+    "bytes": 13077285,
+    "sha256": "4d49e0b68364b0024411e25f1c6b96ef2daf18c92b551820795a89447b511dd6",
+    "bundled": false
+  },
+  {
+    "id": "rook",
+    "role_id": "rook",
+    "name": "Rook",
+    "actions": [
+      "click_reaction",
+      "dragging",
+      "idle",
+      "notice",
+      "patrol",
+      "peek_left",
+      "peek_right",
+      "sit_down",
+      "welcome"
+    ],
+    "bytes": 10761945,
+    "sha256": "ac02c58fe89ce2d2ce7045664d5f029213ff5a8d02fcecab00a6cc93914261eb",
+    "bundled": false
+  },
+  {
+    "id": "raiden",
+    "role_id": "pet-538b78fc53af873a",
+    "name": "Raiden",
+    "actions": [
+      "click_reaction",
+      "dragging",
+      "idle",
+      "peek_left"
+    ],
+    "bytes": 6868110,
+    "sha256": "b1576ea6c2a4836a2d0157bf3faab36338de457b27dcc9b3edcc46c0463600fe",
+    "bundled": false
+  },
+  {
+    "id": "caelus",
+    "role_id": "pet-3cf70f5cf07ae2c3",
+    "name": "Caelus",
+    "actions": [
+      "click_reaction",
+      "dragging",
+      "idle",
+      "peek_left"
+    ],
+    "bytes": 5361237,
+    "sha256": "abf3cfaee2a4fc466c94ee54de90a93a475de26a66ceaa8317e6333f0158723b",
+    "bundled": false
+  },
+  {
+    "id": "arona",
+    "role_id": "pet-2f7ce556e88bb804",
+    "name": "Arona",
+    "actions": [
+      "click_reaction",
+      "dragging",
+      "idle",
+      "peek_left"
+    ],
+    "bytes": 4788406,
+    "sha256": "58b16f98c9ffb0b1a6dcdc2be294d23411a2e46dde4061a545a9faf62776322f",
+    "bundled": false
+  },
+  {
+    "id": "phoenix",
+    "role_id": "pet-f976f5349fedabab",
+    "name": "Phoenix",
+    "actions": [
+      "click_reaction",
+      "dragging",
+      "idle",
+      "peek_left"
+    ],
+    "bytes": 4858965,
+    "sha256": "bad2cf0216794867097a00dbfbf5754db2de298d4d1bbbe97fa677f9d1899984",
+    "bundled": false
+  },
+  {
+    "id": "changfeng",
+    "role_id": "pet-69b517e93cbe07c4",
+    "name": "Changfeng",
+    "actions": [
+      "click_reaction",
+      "dragging",
+      "idle",
+      "peek_left"
+    ],
+    "bytes": 8033974,
+    "sha256": "5c19656dde0adb56f0f5250c849e7016eddf7c728ccc8e66f26d41c48d14f9e7",
+    "bundled": false
+  }
+]

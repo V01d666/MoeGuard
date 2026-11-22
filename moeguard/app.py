@@ -324,49 +324,8 @@ class MoeGuardApp(QObject):
             # preference before the Qt event loop can fire the startup timer.
             self._update_controller.set_auto_check_enabled(self._config.updates.auto_check_enabled)
         logger.info("配置加载完成")
-
-
-        ensure_dirs()
-
-
-        self._db = Database(DB_PATH)
-        self._db.connect()
-        logger.info("数据库已连接: %s", DB_PATH)
-
-        # 4. 加密存储
-        self._crypto = CryptoBox(CRYPTO_KEY_PATH)
-
-
-        self._owner_store = OwnerProfileStore(OWNER_EMBEDDINGS_PATH, self._crypto)
-
-
-        self._recognizer = FaceRecognizer(config=self._config.security)
-
-
-        self._owner = OwnerProfile(self._config.security, self._recognizer)
-        owner_embeddings = self._owner_store.load()
-        self._owner.load(owner_embeddings)
-        if self._owner.is_registered():
-            logger.info("主人特征已恢复（%d 个样本）", len(owner_embeddings))
-        else:
-            logger.info("主人未注册（首次启动或跳过引导）")
-
-        # 8. 摄像头
-        self._camera = CameraCapture()
-
-
-        self._evidence = EvidenceRecorder(
-            evidence_config=self._config.evidence,
-            security_config=self._config.security,
-            recognizer=self._recognizer,
-        )
-        self._evidence_store = EvidenceStore(
-            EVIDENCE_DIR, self._config.evidence.retention_days
-        )
+        self._load_patrol_runtime()
         self._run_evidence_maintenance()
-
-
-        self._state_machine = StateMachine()
 
 
         self._frame_controller = FrameAnimationController()
@@ -432,13 +391,6 @@ class MoeGuardApp(QObject):
         if app is not None:
             self._lock_monitor.install(app)
 
-        # 15. 人脸检测工作线程
-        self._face_worker = _FaceDetectWorker(self._owner)
-        self._face_worker.set_motion_recording_enabled(
-            self._config.evidence.motion_recording_enabled
-        )
-
-
         self._wire_signals()
 
 
@@ -483,6 +435,33 @@ class MoeGuardApp(QObject):
 
         self.ready.emit()
         logger.info("萌卫应用启动完成")
+
+    def _load_patrol_runtime(self) -> None:
+        """Load the local patrol stack without widgets or opening the camera."""
+        assert self._config is not None
+        ensure_dirs()
+        self._db = Database(DB_PATH)
+        self._db.connect()
+        self._crypto = CryptoBox(CRYPTO_KEY_PATH)
+        self._owner_store = OwnerProfileStore(OWNER_EMBEDDINGS_PATH, self._crypto)
+        self._recognizer = FaceRecognizer(config=self._config.security)
+        self._owner = OwnerProfile(self._config.security, self._recognizer)
+        owner_embeddings = self._owner_store.load()
+        self._owner.load(owner_embeddings)
+        if self._owner.is_registered():
+            logger.info("主人特征已恢复（%d 个样本）", len(owner_embeddings))
+        else:
+            logger.info("主人未注册（首次启动或跳过引导）")
+        self._camera = CameraCapture()
+        self._evidence = EvidenceRecorder(
+            evidence_config=self._config.evidence,
+            security_config=self._config.security,
+            recognizer=self._recognizer,
+        )
+        self._evidence_store = EvidenceStore(EVIDENCE_DIR, self._config.evidence.retention_days)
+        self._state_machine = StateMachine()
+        self._face_worker = _FaceDetectWorker(self._owner)
+        self._face_worker.set_motion_recording_enabled(self._config.evidence.motion_recording_enabled)
 
     def _run_evidence_maintenance(self) -> None:
         """清理陈旧临时/过期媒体并补偿孤立索引；每六小时执行一次。"""
@@ -742,27 +721,7 @@ class MoeGuardApp(QObject):
         # 锁屏 -> 状态机
         self._lock_monitor.screen_locked.connect(self._on_lock_screen)
         self._lock_monitor.screen_unlocked.connect(self._on_unlock)
-
-
-        self._state_machine.patrol_started.connect(self._on_patrol_started)
-        self._state_machine.patrol_ended.connect(self._on_patrol_ended)
-        self._state_machine.stranger_detected.connect(self._on_stranger_detected)
-        self._state_machine.owner_greeted.connect(self._on_owner_greeted)
-
-        # 摄像头帧 -> 人脸检测
-        self._camera.frame_ready.connect(self._face_worker.process_frame)
-        self._camera.camera_ready.connect(self._on_camera_ready)
-        self._camera.camera_failed.connect(self._on_camera_failed)
-        self._camera.capture_gap_detected.connect(self._on_camera_capture_gap)
-        self._face_worker.classify_result.connect(self._on_classify_result)
-        self._face_worker.classify_failed.connect(self._on_classify_failed)
-        self._face_worker.motion_detected.connect(self._on_motion_detected)
-
-        # 后台证据录制完成后，统一在 GUI 线程提交目录、数据库与计数。
-        assert self._evidence is not None
-        self._evidence.recording_finished.connect(self._on_evidence_recording_finished)
-
-
+        self._wire_patrol_signals()
         self._tray.toggle_patrol.connect(self._on_tray_toggle_patrol)
         self._tray.quit_requested.connect(self.quit)
         self._tray.open_settings.connect(self._on_open_settings)
@@ -795,6 +754,24 @@ class MoeGuardApp(QObject):
 
         self._feedback.message.connect(self._pet_window.show_message)
 
+    def _wire_patrol_signals(self) -> None:
+        assert self._state_machine is not None
+        assert self._camera is not None
+        assert self._face_worker is not None
+        assert self._evidence is not None
+        self._state_machine.patrol_started.connect(self._on_patrol_started)
+        self._state_machine.patrol_ended.connect(self._on_patrol_ended)
+        self._state_machine.stranger_detected.connect(self._on_stranger_detected)
+        self._state_machine.owner_greeted.connect(self._on_owner_greeted)
+        self._camera.frame_ready.connect(self._face_worker.process_frame)
+        self._camera.camera_ready.connect(self._on_camera_ready)
+        self._camera.camera_failed.connect(self._on_camera_failed)
+        self._camera.capture_gap_detected.connect(self._on_camera_capture_gap)
+        self._face_worker.classify_result.connect(self._on_classify_result)
+        self._face_worker.classify_failed.connect(self._on_classify_failed)
+        self._face_worker.motion_detected.connect(self._on_motion_detected)
+        # Only the Qt event-loop thread commits evidence and its index.
+        self._evidence.recording_finished.connect(self._on_evidence_recording_finished)
 
     def _on_lock_screen(self) -> None:
         """锁屏事件 -> 进入值守。"""
@@ -1929,27 +1906,7 @@ class MoeGuardApp(QObject):
         self._role_credit_dialog = None
         self._mailbox_dialog = None
 
-        recorder_stopped = True
-        if self._evidence is not None:
-            recorder_stopped = self._evidence.cancel_and_wait()
-            if not recorder_stopped:
-                logger.error("退出时后台证据录制未在时限内停止")
-        if recorder_stopped and self._evidence_store is not None:
-            try:
-                removed_pending = self._evidence_store.delete_all_pending()
-                if removed_pending:
-                    logger.info("退出时删除未提交证据 %d 个", removed_pending)
-            except Exception as exc:
-                logger.exception("退出时清理未提交证据失败，将在下次维护重试: %s", exc)
-
-        # 停止摄像头
-        if self._camera is not None:
-            self._camera.stop()
-
-        # 停止人脸检测线程
-        if self._face_worker is not None:
-            self._face_worker.stop()
-
+        self._stop_patrol_runtime()
         # 停止锁屏监听
         if self._lock_monitor is not None:
             self._lock_monitor.stop()
@@ -2013,6 +1970,29 @@ class MoeGuardApp(QObject):
             app.processEvents()
 
         logger.info("萌卫资源已释放")
+
+    def _stop_patrol_runtime(self) -> None:
+        recorder_stopped = True
+        if self._evidence is not None:
+            recorder_stopped = self._evidence.cancel_and_wait()
+            if not recorder_stopped:
+                logger.error("退出时后台证据录制未在时限内停止")
+        if recorder_stopped and self._evidence_store is not None:
+            try:
+                removed_pending = self._evidence_store.delete_all_pending()
+                if removed_pending:
+                    logger.info("退出时删除未提交证据 %d 个", removed_pending)
+            except Exception as exc:
+                logger.exception("退出时清理未提交证据失败，将在下次维护重试: %s", exc)
+
+        # 停止摄像头
+        if self._camera is not None:
+            self._camera.stop()
+
+        # 停止人脸检测线程
+        if self._face_worker is not None:
+            self._face_worker.stop()
+
 
     def quit(self) -> None:
         """Gracefully release resources, then leave the Qt event loop."""

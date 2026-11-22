@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://moeproject.net/en/"><img src="https://img.shields.io/badge/Website-moeproject.net-1E8BFF?style=for-the-badge" alt="Website · moeproject.net"></a>
+  <a href="https://moeguard.com/en/"><img src="https://img.shields.io/badge/Website-moeguard.com-1E8BFF?style=for-the-badge" alt="Website · moeguard.com"></a>
   <a href="https://ifdian.net/a/moeguard"><img src="https://img.shields.io/badge/Afdian-Support%20MoeGuard-946CE6?style=for-the-badge" alt="Support MoeGuard on Afdian"></a>
 </p>
 
@@ -24,70 +24,74 @@
 - Dreamed of making your own, only to be scared off by modeling and animation?
 - Think desktop pets are all cuteness and no use?
 
-Then come play with it on the [MoeGuard website](https://moeproject.net/en/) first, and [take it home](#jump-right-in) if you like it!
+Then come play with it on the [MoeGuard website](https://moeguard.com/en/) first, and [take it home](#jump-right-in) if you like it!
 
-Write a short description or drop in a picture, and you get a pet that's truly yours, animations included. This update focuses on better character art and motion with less waiting. Bored of the look? Give it a makeover whenever you like
+Write a short description or drop artwork into the Workshop to make a pet of your own. Version 0.6.0 rebuilds the Windows client around one Workshop for creating, previewing, and enabling your pets.
 
-Most of the time it hangs out at the edge of your screen while you work (or slack off), reacting when you poke it or pick it up. Lock your screen and walk away, and, only with your explicit consent, it turns on the camera and keeps an eye on things. The moment you're back, the camera goes off and it tells you what happened while you were gone. Who says pets just freeload? (•̀ᴗ•́)و
+Most of the time it hangs out at the edge of your screen while you work (or slack off), reacting when you poke it or pick it up. Once you've given patrol consent and registered the owner, you can also have it start patrol automatically when you lock the screen. Who says pets just freeload? (•̀ᴗ•́)و
 
 It isn't a security camera dressed up as a pet. Think of it as a little partner who sometimes takes the job a bit too seriously: keeping you company most of the time, and keeping watch when needed
 
 ## MoeGuard today
 
-- 🎨 **Pet Workshop**: upgraded character-art and action generation, focusing on finer character detail, better motion and faster results; start with a few words or an image, pick your favorite artwork, then choose its actions
-- 🎚️ **Their own pace**: adjust playback FPS for the current character in Settings; each character keeps its choice across switches and restarts
-- 🔁 **Always fresh**: add or swap actions, rename, or redesign the whole look anytime, with every earlier version kept safe
-- ⏳ **No babysitting**: see real progress and a time estimate, then walk away; the tray and your pet will call you back when it's done
-- 📦 **Take it with you**: export any character as a folder and import it again later, even on another PC
-- 🐾 **Ready out of the box**: Lumen, Poppy, and Rook are ready to go; pick them up or drag them around, and they'll greet you when you return or peek out from the screen edges
-- 📬 **Never miss a note**: announcements and replies from the author pop up in the bottom-right corner; open “信箱…” (Mailbox…) from the tray to read them
-- 🛡️ **Watch duty on the side**: start it by hand or, with separate permission, whenever you lock your screen; strangers or motion leave local snapshots and short clips, the tray, right-click menu, or boss key stops it in one click, and if something goes wrong it stops honestly instead of pretending to keep watch
+- 🎨 **Pet Workshop**. Generate artwork from a description or drop in up to four images. Roll the dice for a name and character traits. Generated candidates appear directly in the preview list.
+- 🎬 **Preview actions**. A pet's first generated actions save automatically and can be played from the action list. After previewing an edit to an existing action, select **Install action** to replace it.
+- 🐾 **Desktop interactions**. A whale-themed pet is included, with more available in the Workshop. Drag your pet, resize it with the mouse wheel, or let it peek out at the edge of the screen. Click it for a reaction.
+- 🎚️ **Quick settings**. Go to **Settings → Desktop pet** to switch instantly using **Current pet** or set each action to 1–60 FPS. Edit the **Boss key** under **General**.
+- 📦 **Manage your pets**. Double-click a local card to rename or delete the pet. Use **Import role…** and **Export current role…** under **Settings → Desktop pet**.
+- 📬 **Inbox**. Right-click the MoeGuard icon in the system tray and select **MoeGuard Inbox** from the menu. You can also open it from the **Workshop guide**.
+- 🛡️ **Opt-in patrol**. Open **Settings → Patrol** to grant consent, select **Preview camera**, or open **Manage local evidence…**. A top-right indicator shows when patrol is capturing. Select **Stop patrol** from the tray to stop it.
 
 ## Jump right in
 
 Download the **Windows x64 installer** and double-click it to get started, with no Python required
 
-When a new version is out, MoeGuard lets you know; just click “更新” (Update) and you're set, with nothing to download again by hand. Your characters, settings, credits, and workshop history all stay put
+After installing v0.6.0, open **Settings → About → Software updates** and select **Check for updates**. When a new version is available, select **Update and restart**.
 
-| 🌐 Official direct link | 🐙 GitHub Releases |
+| 🌐 Official website | 🐙 GitHub Releases |
 | :---: | :---: |
-| [Official installer](https://api.moeproject.net/updates/windows/stable/MoeGuard-Setup.exe) | [Installer on GitHub](https://github.com/V01d666/MoeGuard/releases/latest/download/MoeGuard-Setup.exe) |
+| [Download from the official website](https://moeguard.com/en/#hero-cta) | [v0.6.0 downloads and verification](https://github.com/V01d666/MoeGuard/releases/tag/v0.6.0) |
 
 Just want the pet? No camera required. The first time you turn on watch duty, MoeGuard explains the risks and asks for your consent
 
 <details>
-<summary>🔎 File verification (v0.5.0)</summary>
+<summary>🛠️ Build from source</summary>
 
-| File | Bytes | SHA-256 |
-| --- | ---: | --- |
-| `MoeGuard-Setup.exe` | 212972057 | `ba468c1a1dba5266b44638d4d338f5727824cca8c3c94c576fea788b07ee0bba` |
-
-</details>
-
-<details>
-<summary>🛠️ Running from source</summary>
-
-You'll need **64-bit Windows 10/11 and Python 3.12**:
+On 64-bit Windows 10/11, install Node.js 24, the Rust MSVC toolchain, Visual Studio C++ Build Tools, the Windows SDK, WebView2 Runtime, and Python 3.12. Run these PowerShell commands from the public repository root to build the runnable client and its patrol component.
 
 ```powershell
-git clone https://github.com/V01d666/MoeGuard.git
-cd MoeGuard
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
-.\scripts\windows\start_moeguard.bat
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --distpath artifacts/source-build/patrol --workpath artifacts/source-build/work scripts/windows/moeguard_patrol.spec
+Set-Location desktop
+npm.cmd ci
+npm.cmd run build:windows:patrol
+Copy-Item -Recurse -Force ../artifacts/source-build/patrol/MoeGuard-Patrol ./src-tauri/target/release/
+& ./src-tauri/target/release/MoeGuard.exe
 ```
+
+The build is in `desktop/src-tauri/target/release/`. Keep the full `MoeGuard-Patrol` folder beside `MoeGuard.exe`. If MoeGuard is already running, select **Quit MoeGuard** from its tray menu before launching the build.
 
 </details>
 
 ### 🎟️ Want to try Pet Workshop?
 
-MoeGuard itself is free, and the starter characters and watch duty work right away. Pet Workshop generates in the cloud and counts character art and action generations as separate credits: new users get a trial allowance the first time they open it, enough for one complete pet; after that, top up with a redemption code from [Afdian](https://ifdian.net/a/moeguard) and redeem it under “设置 → 通用 → 查看次数 / 兑换码…” (Settings → General → View credits / Redeem code; the app is currently Chinese-only)
+MoeGuard is free and comes with a ready-to-use pet. Cloud generation uses separate credits for artwork and actions. Open **Pet Workshop → Get credits** and select **Get a code** to visit [Afdian](https://ifdian.net/a/moeguard). Enter the code in the same dialog and select **Redeem code**.
 
 ## Timeline
 
 See [Releases](https://github.com/V01d666/MoeGuard/releases) for the full release history
 
 <details open>
+<summary><strong>V0.6</strong></summary>
+
+| Date | Version | Highlights |
+| :--: | :-- | :-- |
+| `11-22` | 🐾 [**v0.6.0**](https://github.com/V01d666/MoeGuard/releases/tag/v0.6.0) | ✨ A Tauri-based Windows client with a redesigned Workshop and desktop interactions<br>✨ Bilingual Settings tabs, instant pet switching, and per-action FPS<br>🔧 Check for updates from Settings on installed copies |
+
+</details>
+
+<details>
 <summary><strong>V0.5</strong></summary>
 
 | Date | Version | Highlights |
@@ -102,7 +106,7 @@ See [Releases](https://github.com/V01d666/MoeGuard/releases) for the full releas
 | Date | Version | Highlights |
 | :--: | :-- | :-- |
 | `11-04` | 🚀 [**v0.4.2**](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.2) | 🔧 Fix duplicate anonymous accounts from rapid first launches<br>🔧 One instance per data folder; retries and renewals keep the same identity |
-| `10-26` | 🚀 [**v0.4.1**](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.1) | ✨ The [MoeGuard website](https://moeproject.net/en/) launches: poke, pick up, and watch pets peek out<br>✨ Mailbox alerts, character renaming, and tidier Settings |
+| `10-26` | 🚀 [**v0.4.1**](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.1) | ✨ The [MoeGuard website](https://moeguard.com/en/) launches: poke, pick up, and watch pets peek out<br>✨ Mailbox alerts, character renaming, and tidier Settings |
 | `10-18` | 🚀 [**v0.4.0**](https://github.com/V01d666/MoeGuard/releases/tag/v0.4.0) | ✨ Automatic connection and credit refresh; clearer credit warnings<br>✨ Upgrades keep your support ID |
 
 </details>
@@ -148,15 +152,15 @@ Pet Workshop lets anyone create a character they love, but that's only the first
 - 🎁 **One-click sharing**: pack a character into a single file and send it to a friend to import
 - 📡 **Remote alerts**: the moment something stirs during watch duty, a push to your phone, so you can relax while you're out
 
-That's the plan, but a feature only moves into “MoeGuard today” once it's built, tested, and ready to download. Progress is shared on GitHub, the [website](https://moeproject.net/en/), and [Afdian](https://ifdian.net/a/moeguard)
+That's the plan, but a feature only moves into “MoeGuard today” once it's built, tested, and ready to download. Progress is shared on GitHub, the [website](https://moeguard.com/en/), and [Afdian](https://ifdian.net/a/moeguard)
 
 <details>
 <summary>🔒 Camera and data</summary>
 
-- **Watch footage**: the camera turns on only for owner registration and watch duty; face features, footage, and evidence stay on your PC, and watch evidence is kept for 7 days by default
+- **Watch footage**. The camera is used for patrol, camera preview, and owner registration. Face features, footage, and evidence stay on your PC. Patrol evidence is kept for seven days by default.
 - **Cloud generation**: text and images are uploaded only when you start a generation; they are held on the service and cleaned up in campaign batches
 - **Anonymous stats**: only a small set of usage events, an online heartbeat, and network timings, with no prompts, images, character names, local paths, or watch data
-- **Opt out anytime**: revoking watch consent stops capture and deletes owner features and evidence; for a full wipe, quit the app and delete `%USERPROFILE%\.moeguard\`
+- **Withdraw consent**. Select **Stop patrol** in the tray menu. Then use **Withdraw patrol consent…** under **Settings → Patrol** to delete local owner features, evidence, and related records.
 
 The client is fully open source, so every point above can be checked against the code. Use it on your own device in a private space where others know. Detection can miss events, and obstructions, a busy camera, or system sleep can interrupt watch duty; MoeGuard cannot replace professional security equipment
 
@@ -164,15 +168,17 @@ The client is fully open source, so every point above can be checked against the
 
 ## Feedback and development
 
-Found a bug or have an idea? Open the mailbox and copy your support ID under “设置 → 通用 → 关于与反馈” (Settings → General → About and feedback), or come chat in [GitHub Issues](https://github.com/V01d666/MoeGuard/issues)! Before sharing logs, remove usernames, local paths, photos, videos, owner features, and API keys, and **never upload the whole `.moeguard`, `evidence`, or `owner` folder**
+Found a bug or have an idea? Right-click the MoeGuard icon in the system tray and select **MoeGuard Inbox** from the menu. You can also go to **Pet Workshop → Workshop guide** and select **here** in the feedback prompt. Write a message, then select **Send** followed by **Confirm and send**. To copy your Client ID, open **Settings → About** and select **Copy** in **About and feedback**. You can also use [GitHub Issues](https://github.com/V01d666/MoeGuard/issues). Before posting logs publicly, remove your Client ID, usernames, local paths, photos, videos, owner features, and API keys.
 
 MoeGuard is an after-hours hobby project, so there's no promise of enterprise response times, every-platform support, or a fixed release schedule. If it made you smile, a ⭐ Star or a little support on [Afdian](https://ifdian.net/a/moeguard) means a lot～
 
-Want to contribute? Start with:
+Want to contribute? Use the `.venv` created in the build steps above and run the frontend and Python checks from the repository root.
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m ruff check .
+npm.cmd --prefix desktop ci
+npm.cmd --prefix desktop test
+.\.venv\Scripts\python.exe -m ruff check moeguard tests scripts/windows
+New-Item -ItemType Directory -Path .pytest-tmp -Force | Out-Null
 .\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider --basetemp .pytest-tmp/local
 ```
 
