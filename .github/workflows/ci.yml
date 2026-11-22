@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches:
+      - '**'
   pull_request:
 
 permissions:
@@ -137,6 +139,13 @@ jobs:
 
       - name: Test the Workshop and Settings
         run: npm test
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: desktop/src-tauri -> target
+          cache-bin: 'false'
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build the Windows desktop client
         run: npm run build:windows:patrol
